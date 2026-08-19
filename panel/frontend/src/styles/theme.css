@@ -1,0 +1,72 @@
+/*
+ * Muted monochrome terminal palette. Dark is the reference design; light is the
+ * same structure with the ramp inverted, so component CSS never branches on theme.
+ */
+:root {
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+    'Liberation Mono', monospace;
+
+  --dur-fast: 120ms;
+  --dur: 190ms;
+  --dur-slow: 280ms;
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #131417;
+  --surface: #1b1c1f;
+  --surface-raised: #202226;
+  --border: #2c2e33;
+  --border-row: #26282c;
+  --border-strong: #3e4046;
+
+  --text: #c4c5c8;
+  --text-muted: #8e9095;
+  --text-dim: #65676b;
+  --text-tab: #7e8084;
+
+  --chip-bg: #33353a;
+  --chip-text: #c4c5c8;
+
+  --ok: #6fa98c;
+  --warn: #c9a15e;
+  --err: #c9807a;
+
+  --bar-fill: #9a9ca0;
+  --bar-empty: #33353a;
+
+  --focus: #8e9095;
+  --shadow: 0 12px 32px rgb(0 0 0 / 45%);
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #e9e9e6;
+  --surface: #f6f6f4;
+  --surface-raised: #fdfdfc;
+  --border: #d3d3ce;
+  --border-row: #dedeD9;
+  --border-strong: #b6b6b0;
+
+  --text: #2f3033;
+  --text-muted: #63656a;
+  --text-dim: #86888d;
+  --text-tab: #75777c;
+
+  --chip-bg: #dcdcd6;
+  --chip-text: #2f3033;
+
+  --ok: #43775e;
+  --warn: #8a6524;
+  --err: #9b4f48;
+
+  --bar-fill: #6c6e73;
+  --bar-empty: #d3d3ce;
+
+  --focus: #63656a;
+  --shadow: 0 12px 32px rgb(0 0 0 / 12%);
+}

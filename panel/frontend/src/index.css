@@ -1,0 +1,511 @@
+@import './styles/theme.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  /* Theme flips animate instead of snapping. */
+  transition:
+    background-color var(--dur-slow) var(--ease),
+    color var(--dur-slow) var(--ease);
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------- shell ---------- */
+
+/* The panel is an application surface: it fills the window instead of sitting
+   in a small box in the middle of the screen. */
+.shell {
+  min-height: 100vh;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  transition: background-color var(--dur-slow) var(--ease);
+}
+
+.term {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0 clamp(16px, 3vw, 48px);
+}
+
+.term-body {
+  flex: 1;
+  padding-bottom: 24px;
+}
+
+.term-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 0 14px;
+}
+
+.term-title {
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+.dim {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.muted {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.hl {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-chip .role {
+  font-size: 11px;
+  background: var(--chip-bg);
+  color: var(--chip-text);
+  padding: 1px 6px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* ---------- tabs ---------- */
+
+.tabs {
+  display: flex;
+  gap: 22px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tab {
+  font-size: 13px;
+  color: var(--text-tab);
+  padding: 0 0 9px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-bottom: 1px solid transparent;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab.active {
+  color: var(--text);
+  border-bottom-color: var(--text-muted);
+}
+
+/* ---------- stat strip ---------- */
+
+.stats {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+  align-items: baseline;
+}
+
+.stats .sep {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* ---------- table ---------- */
+
+.row {
+  display: grid;
+  grid-template-columns: 12px minmax(170px, 1.1fr) minmax(150px, 1fr) 110px 90px 70px minmax(150px, 210px) 120px 130px;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-row);
+}
+
+.actions {
+  display: inline-flex;
+  gap: 6px;
+  justify-content: flex-end;
+  /* Dimmed rather than hidden: a control you cannot see is a control you
+     cannot reach on touch. */
+  opacity: 0.4;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.row:hover .actions,
+.actions:focus-within {
+  opacity: 1;
+}
+
+.row.head {
+  border-top: none;
+  padding-top: 0;
+}
+
+.row.clients {
+  grid-template-columns: 12px minmax(200px, 1.2fr) minmax(160px, 1fr) 100px 100px 120px 120px 190px;
+}
+
+.row.selectable {
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+
+.row.selectable:hover {
+  background: var(--surface-raised);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: background-color var(--dur) var(--ease);
+}
+
+.dot.online {
+  background: var(--ok);
+}
+
+.dot.error,
+.dot.offline {
+  background: var(--err);
+}
+
+.dot.unknown {
+  background: var(--warn);
+}
+
+.dot.disabled {
+  background: var(--text-dim);
+}
+
+.name {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.name.faded {
+  color: var(--text-muted);
+}
+
+.sub {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.sub.warn {
+  color: var(--warn);
+}
+
+.sub.err {
+  color: var(--err);
+}
+
+.chip {
+  font-size: 12px;
+  background: var(--chip-bg);
+  color: var(--chip-text);
+  padding: 2px 8px;
+  justify-self: start;
+}
+
+.right {
+  text-align: right;
+  font-size: 12px;
+}
+
+.bar-fill {
+  color: var(--bar-fill);
+}
+
+.bar-empty {
+  color: var(--bar-empty);
+}
+
+/* ---------- footer / hotkeys ---------- */
+
+.term-foot {
+  border-top: 1px solid var(--border);
+  margin-top: 14px;
+  padding: 14px 0;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ---------- buttons ---------- */
+
+.btn {
+  font-size: 12px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text);
+  padding: 5px 10px;
+  cursor: pointer;
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--chip-bg);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn.danger {
+  border-color: var(--err);
+  color: var(--err);
+}
+
+.btn.ghost {
+  border-color: transparent;
+  color: var(--text-dim);
+}
+
+.btn.ghost:hover {
+  color: var(--text);
+}
+
+/* ---------- forms ---------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.field input,
+.field select {
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 13px;
+  min-width: 200px;
+  transition:
+    border-color var(--dur) var(--ease),
+    background-color var(--dur-slow) var(--ease);
+}
+
+.field input:focus {
+  border-color: var(--text-muted);
+}
+
+.inline-form {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  padding: 18px 0 6px;
+  border-top: 1px solid var(--border-row);
+}
+
+.form-error {
+  color: var(--err);
+  font-size: 12px;
+}
+
+/* ---------- node access picker ---------- */
+
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+}
+
+.picker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background-color var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+
+.picker-item:hover {
+  color: var(--text);
+}
+
+.picker-item[aria-pressed='true'] {
+  background: var(--chip-bg);
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+
+.picker-item .mark {
+  color: var(--text-dim);
+}
+
+.picker-item[aria-pressed='true'] .mark {
+  color: var(--ok);
+}
+
+/* ---------- login ---------- */
+
+.login-page {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: 380px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  padding: 28px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: rise var(--dur-slow) var(--ease) both;
+}
+
+.login-card h1 {
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+}
+
+.login-card .btn {
+  padding: 7px 8px;
+  font-size: 12px;
+}
+
+/* ---------- placeholder / empty ---------- */
+
+.empty {
+  padding: 40px 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* ---------- transitions ---------- */
+
+.view {
+  animation: view-in var(--dur) var(--ease) both;
+}
+
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fade-in {
+  animation: fade var(--dur) var(--ease) both;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}

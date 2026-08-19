@@ -30,6 +30,20 @@ docker compose up -d --build
 Panel: <http://localhost:8080>. The API is same-origin under `/api/v1`, proxied by
 nginx to the backend, so no CORS setup is needed.
 
+### With a domain and HTTPS
+
+Point an A record at the host, set `AEOLUS_DOMAIN` in `.env`, then bring the stack up
+with the production overlay:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+Caddy obtains a Let's Encrypt certificate, redirects HTTP to HTTPS and becomes the
+only published port; Postgres, the API and nginx stay on the internal network. Serve
+the panel over plain HTTP only on a loopback interface — the login sends a password
+and the API sends bearer tokens.
+
 The bootstrap admin is created on first startup only, while the users table is
 empty. Clear `AEOLUS_FIRST_ADMIN_PASSWORD` once you have logged in.
 

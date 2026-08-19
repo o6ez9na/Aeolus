@@ -25,6 +25,9 @@ services:
     environment:
       AEOLUS_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aeolus}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aeolus}
       AEOLUS_SECRET_KEY: ${AEOLUS_SECRET_KEY:?set AEOLUS_SECRET_KEY in .env}
+      # Encrypts CA and client private keys at rest. Losing it means re-issuing
+      # every certificate, so it is separate from the session secret.
+      AEOLUS_PKI_SECRET: ${AEOLUS_PKI_SECRET:?set AEOLUS_PKI_SECRET in .env}
       AEOLUS_DEBUG: ${AEOLUS_DEBUG:-false}
       AEOLUS_FIRST_ADMIN_USERNAME: ${AEOLUS_FIRST_ADMIN_USERNAME:-admin}
       AEOLUS_FIRST_ADMIN_PASSWORD: ${AEOLUS_FIRST_ADMIN_PASSWORD:-}

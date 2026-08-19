@@ -1,0 +1,27 @@
+# Production overlay: terminate TLS at Caddy and keep everything else off the
+# public interface.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+services:
+  frontend:
+    # Caddy is the only thing that should be reachable from outside.
+    ports: !reset []
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - frontend
+    environment:
+      AEOLUS_DOMAIN: ${AEOLUS_DOMAIN:?set AEOLUS_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

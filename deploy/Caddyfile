@@ -1,0 +1,14 @@
+{$AEOLUS_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		# The panel is HTTPS-only once a certificate exists; do not let a
+		# downgraded request carry a session token in the clear.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
+
+	reverse_proxy frontend:80
+}

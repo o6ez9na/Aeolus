@@ -34,8 +34,13 @@ services:
       # Used as the address of the panel's own node, which registers itself.
       AEOLUS_DOMAIN: ${AEOLUS_DOMAIN:-}
       AEOLUS_PUBLIC_HOST: ${AEOLUS_PUBLIC_HOST:-}
+      AEOLUS_MASTER_OPENVPN_PORT: ${AEOLUS_VPN_PORT:-1194}
+      AEOLUS_VPN_SUBNET: ${AEOLUS_VPN_SUBNET:-10.8.0.0}
     expose:
       - "8000"
+    volumes:
+      # The backend writes the OpenVPN bundle the openvpn container consumes.
+      - openvpn-config:/etc/openvpn/aeolus
 
   frontend:
     build: ./panel/frontend
@@ -45,5 +50,27 @@ services:
     ports:
       - "${PANEL_PORT:-8080}:80"
 
+  # The panel host is a node: this is its OpenVPN. Config and certificates are
+  # written into the shared volume by the backend on startup.
+  openvpn:
+    build: ./deploy/openvpn
+    restart: unless-stopped
+    depends_on:
+      - backend
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      net.ipv4.ip_forward: 1
+    environment:
+      AEOLUS_VPN_SUBNET: ${AEOLUS_VPN_SUBNET:-10.8.0.0}
+      AEOLUS_VPN_MASK_BITS: ${AEOLUS_VPN_MASK_BITS:-24}
+    ports:
+      - "${AEOLUS_VPN_PORT:-1194}:1194/udp"
+    volumes:
+      - openvpn-config:/etc/openvpn/aeolus
+
 volumes:
   postgres-data:
+  openvpn-config:

@@ -10,7 +10,7 @@ from app.core.crypto import SecretUnreadableError
 from app.models.node import Client, Node
 from app.schemas.node import ClientRead, NodeRead
 from app.schemas.pki import CaInit, CaStatus
-from app.services import pki
+from app.services import openvpn, pki
 
 router = APIRouter(prefix="/pki", tags=["pki"])
 
@@ -111,7 +111,10 @@ async def revoke_client_certificate(
 
     try:
         await pki.revoke_client(session, client)
-    except pki.PkiError as exc:
+        # Push the new CRL to the local node immediately; a revoke that has not
+        # reached a node has not actually revoked anything.
+        await openvpn.sync_local_crl(session)
+    except (pki.PkiError, SecretUnreadableError) as exc:
         raise _pki_error(exc) from None
 
     await session.commit()

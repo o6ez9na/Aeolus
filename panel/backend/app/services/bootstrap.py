@@ -6,6 +6,7 @@ fills in what is missing.
 """
 
 import logging
+from pathlib import Path
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +15,7 @@ from app.core.config import settings
 from app.core.security import hash_password
 from app.models.node import Node, NodeRole
 from app.models.user import User, UserRole
-from app.services import pki
+from app.services import openvpn, pki
 
 logger = logging.getLogger("aeolus.bootstrap")
 
@@ -77,6 +78,26 @@ async def ensure_master_node(session: AsyncSession) -> None:
     if node.server_cert_serial is None:
         await pki.issue_server_cert(session, node)
         logger.warning("Issued server certificate for panel node %r", node.name)
+
+    await write_master_bundle(session, node)
+
+
+async def write_master_bundle(session: AsyncSession, node: Node) -> None:
+    """Materialise the local OpenVPN config so the openvpn container can start.
+
+    Skipped when the directory is not mounted, which is the case for a plain
+    local backend run without the VPN container.
+    """
+    if not Path(settings.openvpn_config_dir).parent.exists():
+        logger.info(
+            "%s is not mounted; skipping OpenVPN bundle for the panel node",
+            settings.openvpn_config_dir,
+        )
+        return
+
+    ca = await pki.require_ca(session)
+    crl_pem = await pki.build_crl(session)
+    openvpn.write_server_bundle(node, ca, crl_pem)
 
 
 async def run(session: AsyncSession) -> None:

@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     master_openvpn_port: int = 1194
     master_openvpn_proto: str = "udp"
 
+    # OpenVPN on the panel host. The directory is a volume shared with the
+    # openvpn container.
+    openvpn_config_dir: str = "/etc/openvpn/aeolus"
+    vpn_subnet: str = "10.8.0.0"
+    vpn_netmask: str = "255.255.255.0"
+    vpn_dns: str = "1.1.1.1"
+
     @property
     def master_node_address(self) -> str | None:
         return self.public_host or self.domain

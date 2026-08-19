@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 
-import { api } from '../api/client'
+import { api, authorizedDownload } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { ConfirmButton } from '../components/ConfirmButton'
 import { NodePicker } from '../components/NodePicker'
@@ -179,6 +179,33 @@ export function ClientsPage() {
               <button className="btn ghost" onClick={() => setExpandedId(null)}>
                 отмена
               </button>
+              {client.cert_serial && client.status !== 'revoked' && (
+                <div className="field" style={{ flexBasis: '100%' }}>
+                  конфигурация клиента
+                  <div className="picker">
+                    {client.node_ids.map((nodeId) => (
+                      <button
+                        key={nodeId}
+                        type="button"
+                        className="btn"
+                        onClick={() =>
+                          authorizedDownload(
+                            `/clients/${client.id}/config/${nodeId}`,
+                            `${client.common_name}-${nodesById[nodeId]?.name ?? 'node'}.ovpn`,
+                          )
+                        }
+                      >
+                        скачать .ovpn · {nodesById[nodeId]?.name ?? '—'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {!client.cert_serial && (
+                <span className="sub warn">
+                  сертификата нет — выпусти его в разделе pki, тогда появится .ovpn
+                </span>
+              )}
             </div>
           )}
         </div>

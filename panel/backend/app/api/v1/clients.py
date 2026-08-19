@@ -1,13 +1,16 @@
 import uuid
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, OperatorUser, SessionDep
+from app.core.crypto import SecretUnreadableError
 from app.models.node import Client, ClientNodeGrant, Node
 from app.schemas.node import ClientCreate, ClientRead, ClientUpdate
+from app.services import openvpn, pki
 
 router = APIRouter(prefix="/clients", tags=["clients"])
 
@@ -90,6 +93,32 @@ async def update_client(
 
     await session.commit()
     return _serialize(await _load(session, client_id))
+
+
+@router.get("/{client_id}/config/{node_id}", response_class=PlainTextResponse)
+async def download_client_config(
+    client_id: uuid.UUID, node_id: uuid.UUID, session: SessionDep, _: OperatorUser
+) -> str:
+    """Build the .ovpn for this client on this node."""
+    client = await _load(session, client_id)
+
+    if node_id not in {grant.node_id for grant in client.grants}:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Client is not granted access to that node",
+        )
+
+    node = await session.get(Node, node_id)
+    if node is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Node not found")
+
+    try:
+        ca = await pki.require_ca(session)
+        return openvpn.render_client_config(client, node, ca)
+    except (openvpn.OpenVpnError, pki.PkiError) as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
+    except SecretUnreadableError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from None
 
 
 @router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT)

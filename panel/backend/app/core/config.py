@@ -23,6 +23,13 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    # Encrypts CA and client private keys at rest. Falls back to secret_key when
+    # unset; rotating either one makes existing stored keys unreadable.
+    pki_secret: str | None = None
+    ca_valid_days: int = 3650
+    server_cert_valid_days: int = 825
+    client_cert_valid_days: int = 365
+
     # Bootstrap admin, created on first startup if no users exist.
     first_admin_username: str = "admin"
     first_admin_password: str | None = None

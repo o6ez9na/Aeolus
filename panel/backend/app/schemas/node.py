@@ -47,6 +47,7 @@ class NodeRead(NodeBase):
     rx_bytes: int
     tx_bytes: int
     server_cert_not_after: datetime | None
+    server_cert_serial: str | None
     created_at: datetime
 
 

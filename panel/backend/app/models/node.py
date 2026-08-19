@@ -69,6 +69,9 @@ class Node(Base, UUIDMixin, TimestampMixin):
 
     # Server certificate expiry, so the UI can warn before OpenVPN starts refusing.
     server_cert_not_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    server_cert_pem: Mapped[str | None] = mapped_column(Text)
+    server_key_pem_encrypted: Mapped[str | None] = mapped_column(Text)
+    server_cert_serial: Mapped[str | None] = mapped_column(String(64))
 
     grants: Mapped[list["ClientNodeGrant"]] = relationship(
         back_populates="node", cascade="all, delete-orphan"
@@ -101,9 +104,11 @@ class Client(Base, UUIDMixin, TimestampMixin):
         ForeignKey("nodes.id", ondelete="SET NULL")
     )
 
-    # PKI. Private key is generated client-side or stored encrypted; see services/pki.
+    # PKI. The key is kept encrypted so the .ovpn can be handed out again; anyone
+    # who can read it can already mint new certificates from the CA next to it.
     cert_serial: Mapped[str | None] = mapped_column(String(64), unique=True)
     cert_pem: Mapped[str | None] = mapped_column(Text)
+    key_pem_encrypted: Mapped[str | None] = mapped_column(Text)
     cert_not_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

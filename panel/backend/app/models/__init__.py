@@ -7,10 +7,12 @@ from app.models.node import (
     NodeRole,
     NodeStatus,
 )
+from app.models.pki import CertificateAuthority
 from app.models.user import RefreshToken, User, UserRole
 
 __all__ = [
     "Base",
+    "CertificateAuthority",
     "Client",
     "ClientNodeGrant",
     "ClientStatus",

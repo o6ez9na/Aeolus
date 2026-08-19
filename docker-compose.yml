@@ -31,6 +31,9 @@ services:
       AEOLUS_DEBUG: ${AEOLUS_DEBUG:-false}
       AEOLUS_FIRST_ADMIN_USERNAME: ${AEOLUS_FIRST_ADMIN_USERNAME:-admin}
       AEOLUS_FIRST_ADMIN_PASSWORD: ${AEOLUS_FIRST_ADMIN_PASSWORD:-}
+      # Used as the address of the panel's own node, which registers itself.
+      AEOLUS_DOMAIN: ${AEOLUS_DOMAIN:-}
+      AEOLUS_PUBLIC_HOST: ${AEOLUS_PUBLIC_HOST:-}
     expose:
       - "8000"
 

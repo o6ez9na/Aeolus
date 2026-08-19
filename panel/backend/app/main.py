@@ -3,38 +3,19 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func, select
 
 from app.api.v1 import api_router
 from app.core.config import settings
 from app.core.db import SessionLocal, engine
-from app.core.security import hash_password
-from app.models.user import User, UserRole
+from app.services import bootstrap
 
 logger = logging.getLogger("aeolus")
 
 
-async def bootstrap_admin() -> None:
-    if not settings.first_admin_password:
-        return
-    async with SessionLocal() as session:
-        count = await session.scalar(select(func.count()).select_from(User))
-        if count:
-            return
-        session.add(
-            User(
-                username=settings.first_admin_username,
-                password_hash=hash_password(settings.first_admin_password),
-                role=UserRole.admin,
-            )
-        )
-        await session.commit()
-        logger.warning("Created bootstrap admin %r", settings.first_admin_username)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await bootstrap_admin()
+    async with SessionLocal() as session:
+        await bootstrap.run(session)
     yield
     await engine.dispose()
 

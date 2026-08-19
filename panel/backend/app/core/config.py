@@ -34,6 +34,20 @@ class Settings(BaseSettings):
     first_admin_username: str = "admin"
     first_admin_password: str | None = None
 
+    # The panel host is a node too. It registers itself on startup so an operator
+    # never has to add it by hand.
+    master_node_name: str = "panel"
+    # Address clients dial to reach the panel's own OpenVPN. Falls back to the
+    # panel domain when unset.
+    public_host: str | None = None
+    domain: str | None = None
+    master_openvpn_port: int = 1194
+    master_openvpn_proto: str = "udp"
+
+    @property
+    def master_node_address(self) -> str | None:
+        return self.public_host or self.domain
+
 
 @lru_cache
 def get_settings() -> Settings:

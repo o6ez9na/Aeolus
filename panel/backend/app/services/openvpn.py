@@ -50,6 +50,13 @@ auth SHA256
 tls-version-min 1.2
 remote-cert-tls client
 
+# A 1500-byte tunnel MTU makes the encapsulated packet exceed the path MTU on
+# most mobile networks, which drop it. Small packets then work while anything
+# large — TLS, QUIC — silently stalls. Leave headroom for the UDP, tls-crypt and
+# AES-GCM overhead, and clamp TCP MSS to match.
+tun-mtu {settings.vpn_tun_mtu}
+mssfix {settings.vpn_mssfix}
+
 keepalive 10 120
 persist-key
 persist-tun

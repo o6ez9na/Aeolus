@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     vpn_subnet: str = "10.8.0.0"
     vpn_netmask: str = "255.255.255.0"
     vpn_dns: str = "1.1.1.1"
+    # Conservative enough for mobile carriers, which commonly cap the path at
+    # ~1400 bytes and drop anything larger instead of fragmenting.
+    vpn_tun_mtu: int = 1360
+    vpn_mssfix: int = 1300
 
     @property
     def master_node_address(self) -> str | None:

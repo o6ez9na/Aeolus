@@ -49,8 +49,12 @@ def _key_from_pem(pem: str) -> ec.EllipticCurvePrivateKey:
     return serialization.load_pem_private_key(pem.encode(), password=None)
 
 
-def _cert_to_pem(cert: x509.Certificate) -> str:
+def cert_to_pem(cert: x509.Certificate) -> str:
     return cert.public_bytes(serialization.Encoding.PEM).decode()
+
+
+# Internal alias kept for the private helpers below.
+_cert_to_pem = cert_to_pem
 
 
 def _name(common_name: str) -> x509.Name:
@@ -238,6 +242,88 @@ async def issue_client_cert(session: AsyncSession, client: Client) -> Client:
     client.cert_serial = f"{cert.serial_number:x}"
     client.cert_not_after = cert.not_valid_after_utc
     return client
+
+
+def sign_agent_csr(ca: CertificateAuthority, csr_pem: str, expected_cn: str) -> x509.Certificate:
+    """Sign an agent CSR as a client certificate.
+
+    The subject is taken from the node, not from the request: a CSR is an
+    unauthenticated blob, and letting it name itself would let one node enrol as
+    another.
+    """
+    try:
+        csr = x509.load_pem_x509_csr(csr_pem.encode())
+    except ValueError as exc:
+        raise PkiError(f"malformed CSR: {exc}") from None
+
+    if not csr.is_signature_valid:
+        raise PkiError("CSR signature does not verify")
+
+    ca_cert, ca_key = _ca_material(ca)
+    now = datetime.now(UTC)
+
+    return (
+        x509.CertificateBuilder()
+        .subject_name(_name(expected_cn))
+        .issuer_name(ca_cert.subject)
+        .public_key(csr.public_key())
+        .serial_number(_take_serial(ca))
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=settings.agent_cert_valid_days))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.CLIENT_AUTH]),
+            critical=False,
+        )
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key()),
+            critical=False,
+        )
+        .sign(ca_key, hashes.SHA256())
+    )
+
+
+async def ensure_grpc_cert(session: AsyncSession, hosts: list[str]) -> CertificateAuthority:
+    """Give the panel's gRPC endpoint a server certificate from our own CA."""
+    ca = await require_ca(session)
+    if ca.grpc_cert_pem is not None:
+        cert = x509.load_pem_x509_certificate(ca.grpc_cert_pem.encode())
+        try:
+            existing = {
+                str(name.value)
+                for name in cert.extensions.get_extension_for_class(
+                    x509.SubjectAlternativeName
+                ).value
+            }
+        except x509.ExtensionNotFound:
+            existing = set()
+        if set(hosts) <= existing and cert.not_valid_after_utc > datetime.now(UTC):
+            return ca
+
+    cert_pem, key_pem, _ = _sign_leaf(
+        ca,
+        "aeolus-panel-grpc",
+        valid_days=settings.server_cert_valid_days,
+        server=True,
+        san_hosts=hosts,
+    )
+    ca.grpc_cert_pem = cert_pem
+    ca.grpc_key_pem_encrypted = encrypt_secret(key_pem)
+    return ca
 
 
 async def issue_server_cert(session: AsyncSession, node: Node) -> Node:

@@ -364,3 +364,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Generated from proto/ at build time
+grpc_gen/

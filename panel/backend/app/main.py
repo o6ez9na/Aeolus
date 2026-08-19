@@ -12,11 +12,36 @@ from app.services import bootstrap
 logger = logging.getLogger("aeolus")
 
 
+async def _start_grpc():
+    """Serve the agent endpoint alongside HTTP, or explain why it is off."""
+    if not settings.grpc_enabled:
+        return None
+
+    from app.grpc.server import build_server
+
+    try:
+        server = await build_server()
+    except Exception:
+        logger.exception("gRPC endpoint failed to start; agents cannot connect")
+        return None
+
+    if server is None:
+        return None
+
+    await server.start()
+    logger.warning("Agent gRPC endpoint on %s:%s", settings.grpc_host, settings.grpc_port)
+    return server
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with SessionLocal() as session:
         await bootstrap.run(session)
+
+    grpc_server = await _start_grpc()
     yield
+    if grpc_server is not None:
+        await grpc_server.stop(grace=2)
     await engine.dispose()
 
 

@@ -20,6 +20,11 @@ class CertificateAuthority(Base, UUIDMixin, TimestampMixin):
     # TLS handshake, so a scanner cannot tell the port speaks OpenVPN.
     tls_crypt_key_encrypted: Mapped[str] = mapped_column(Text)
 
+    # TLS identity of the panel's own gRPC endpoint, signed by this CA so agents
+    # can verify the panel with the same trust root they already carry.
+    grpc_cert_pem: Mapped[str | None] = mapped_column(Text)
+    grpc_key_pem_encrypted: Mapped[str | None] = mapped_column(Text)
+
     # Certificate serials must never repeat for the same CA.
     next_serial: Mapped[int] = mapped_column(BigInteger, default=2)
     crl_number: Mapped[int] = mapped_column(BigInteger, default=1)

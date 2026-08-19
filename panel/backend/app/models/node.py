@@ -41,8 +41,16 @@ class Node(Base, UUIDMixin, TimestampMixin):
     country_code: Mapped[str | None] = mapped_column(String(2))
     agent_port: Mapped[int] = mapped_column(Integer, default=50051)
 
-    # SHA-256 fingerprint of the agent's client certificate; pinned on connect.
-    agent_cert_fingerprint: Mapped[str | None] = mapped_column(String(95), unique=True)
+    # Agent enrolment. The token is stored hashed: it is a credential, and the
+    # panel only ever needs to compare it.
+    enrollment_token_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    enrollment_token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    agent_cert_serial: Mapped[str | None] = mapped_column(String(64))
+    agent_cert_not_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    agent_version: Mapped[str | None] = mapped_column(String(32))
+    config_revision: Mapped[str | None] = mapped_column(String(64))
 
     openvpn_port: Mapped[int] = mapped_column(Integer, default=1194)
     openvpn_proto: Mapped[str] = mapped_column(String(3), default="udp")

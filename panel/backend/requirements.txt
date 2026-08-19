@@ -7,5 +7,8 @@ asyncpg==0.30.0
 alembic==1.16.5
 pyjwt==2.10.1
 cryptography==50.0.0
+grpcio==1.76.0
+grpcio-tools==1.76.0
+protobuf==6.33.1
 argon2-cffi==25.1.0
 python-multipart==0.0.20

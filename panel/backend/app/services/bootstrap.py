@@ -6,6 +6,7 @@ fills in what is missing.
 """
 
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import func, select
@@ -15,7 +16,7 @@ from app.core.config import settings
 from app.core.security import hash_password
 from app.models.node import Node, NodeRole
 from app.models.user import User, UserRole
-from app.services import openvpn, pki
+from app.services import agent, openvpn, pki
 
 logger = logging.getLogger("aeolus.bootstrap")
 
@@ -80,6 +81,36 @@ async def ensure_master_node(session: AsyncSession) -> None:
         logger.warning("Issued server certificate for panel node %r", node.name)
 
     await write_master_bundle(session, node)
+    await _ensure_local_enrollment_token(session, node)
+
+
+async def _ensure_local_enrollment_token(session: AsyncSession, node: Node) -> None:
+    """Leave a token where the panel's own agent will find it.
+
+    Remote nodes get their token from an operator; the local one should not need
+    a human in the loop at all.
+    """
+    # Keep a token available until the agent actually reports in. An agent that
+    # lost its state directory needs to enrol again, and there is no operator in
+    # the loop for the local node.
+    if node.last_seen_at is not None:
+        return
+
+    token_path = Path(settings.openvpn_config_dir) / ".enrollment-token"
+    if not token_path.parent.exists():
+        return
+
+    still_valid = (
+        node.enrollment_token_expires_at is not None
+        and node.enrollment_token_expires_at > datetime.now(UTC)
+    )
+    if token_path.exists() and still_valid:
+        return
+
+    token = await agent.issue_enrollment_token(session, node)
+    token_path.write_text(token)
+    token_path.chmod(0o600)
+    logger.warning("Left an enrolment token for the local agent at %s", token_path)
 
 
 async def write_master_bundle(session: AsyncSession, node: Node) -> None:

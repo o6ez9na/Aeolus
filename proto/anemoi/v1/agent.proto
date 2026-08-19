@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package aeolus.anemoi.v1;
+
+// The agent dials the panel, never the other way round: a node then needs no
+// inbound port beyond OpenVPN itself, and works behind NAT.
+//
+// Every call requires a client certificate the panel's CA issued during
+// enrolment, and the node identity comes from that certificate's CN — never
+// from a field in the request.
+//
+// Enrolment itself is not here: it happens over the panel's HTTPS API, because
+// it is the one exchange that takes place before the agent has a certificate.
+service NodeAgent {
+  rpc GetConfig(ConfigRequest) returns (ConfigResponse);
+  rpc ReportStatus(StatusReport) returns (StatusAck);
+}
+
+message ConfigRequest {
+  // Revision the agent already has on disk; the panel skips the payload when it
+  // matches.
+  string known_revision = 1;
+}
+
+message ConfigResponse {
+  bool unchanged = 1;
+  string revision = 2;
+  string server_conf = 3;
+  string ca_pem = 4;
+  string server_cert_pem = 5;
+  string server_key_pem = 6;
+  string tls_crypt_key = 7;
+  string crl_pem = 8;
+  // client-config-dir entries, keyed by common name.
+  map<string, string> ccd = 9;
+}
+
+message Session {
+  string common_name = 1;
+  string real_address = 2;
+  string virtual_address = 3;
+  uint64 rx_bytes = 4;
+  uint64 tx_bytes = 5;
+  string connected_since = 6;
+}
+
+message StatusReport {
+  bool openvpn_running = 1;
+  string message = 2;
+  uint64 rx_bytes = 3;
+  uint64 tx_bytes = 4;
+  uint32 bandwidth_mbps = 5;
+  repeated Session sessions = 6;
+  string agent_version = 7;
+  string config_revision = 8;
+}
+
+message StatusAck {
+  // Set when the panel holds a newer configuration than the agent reported.
+  bool config_stale = 1;
+}

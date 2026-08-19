@@ -6,7 +6,14 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, OperatorUser, SessionDep
 from app.models.node import Client, ClientStatus, Node, NodeStatus
-from app.schemas.node import NodeCreate, NodeRead, NodeSummary, NodeUpdate
+from app.schemas.node import (
+    EnrollmentToken,
+    NodeCreate,
+    NodeRead,
+    NodeSummary,
+    NodeUpdate,
+)
+from app.services import agent
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 
@@ -88,6 +95,24 @@ async def update_node(
     await session.commit()
     await session.refresh(node)
     return node
+
+
+@router.post("/{node_id}/enrollment-token", response_model=EnrollmentToken)
+async def create_enrollment_token(
+    node_id: uuid.UUID, session: SessionDep, _: OperatorUser
+) -> EnrollmentToken:
+    """Mint a one-time token for this node's agent.
+
+    Shown once: only its hash is stored, so it cannot be retrieved again.
+    """
+    node = await _get_node(session, node_id)
+    token = await agent.issue_enrollment_token(session, node)
+    await session.commit()
+    return EnrollmentToken(
+        token=token,
+        expires_at=node.enrollment_token_expires_at,
+        node_name=node.name,
+    )
 
 
 @router.delete("/{node_id}", status_code=status.HTTP_204_NO_CONTENT)

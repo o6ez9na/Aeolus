@@ -29,6 +29,15 @@ class Settings(BaseSettings):
     ca_valid_days: int = 3650
     server_cert_valid_days: int = 825
     client_cert_valid_days: int = 365
+    agent_cert_valid_days: int = 825
+
+    # gRPC endpoint the anemoi agents dial.
+    grpc_host: str = "0.0.0.0"
+    grpc_port: int = 50051
+    grpc_enabled: bool = True
+    # Extra names the agents may use to reach the panel, on top of the domain.
+    grpc_san_hosts: list[str] = ["localhost", "backend"]
+    node_offline_after_seconds: int = 90
 
     # Bootstrap admin, created on first startup if no users exist.
     first_admin_username: str = "admin"

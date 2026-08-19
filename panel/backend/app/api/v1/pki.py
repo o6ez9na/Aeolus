@@ -62,6 +62,20 @@ async def init_ca(body: CaInit, session: SessionDep, _: AdminUser) -> CaStatus:
     return await ca_status(session, _)
 
 
+@router.get("/bootstrap-ca.crt", response_class=PlainTextResponse)
+async def bootstrap_ca(session: SessionDep) -> str:
+    """The CA certificate, without authentication.
+
+    A CA certificate is public material — it is inlined in every .ovpn already.
+    An agent needs it before it has any credentials, so this is how a new node
+    learns which CA to trust, fetched over the panel's own HTTPS.
+    """
+    ca = await pki.get_active_ca(session)
+    if ca is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "CA is not initialised yet")
+    return ca.cert_pem
+
+
 @router.get("/ca.crt", response_class=PlainTextResponse)
 async def download_ca(session: SessionDep, _: CurrentUser) -> str:
     ca = await pki.get_active_ca(session)

@@ -48,7 +48,18 @@ class NodeRead(NodeBase):
     tx_bytes: int
     server_cert_not_after: datetime | None
     server_cert_serial: str | None
+    agent_version: str | None
+    agent_cert_serial: str | None
+    config_revision: str | None
     created_at: datetime
+
+
+class EnrollmentToken(BaseModel):
+    """Returned once, at creation time."""
+
+    token: str
+    node_name: str
+    expires_at: datetime | None
 
 
 class NodeSummary(BaseModel):

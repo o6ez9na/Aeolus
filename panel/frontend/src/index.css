@@ -285,6 +285,44 @@ select {
   color: var(--bar-empty);
 }
 
+/* ---------- pki ---------- */
+
+.row.pki {
+  grid-template-columns: 12px minmax(220px, 1fr) 140px 140px minmax(220px, 320px);
+}
+
+.ca-card {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 16px 0 18px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+}
+
+.ca-facts {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  flex: 1;
+}
+
+.ca-facts .sep {
+  color: var(--text-dim);
+}
+
+.ca-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.section-title {
+  padding: 22px 0 10px;
+  letter-spacing: 0.04em;
+}
+
 /* ---------- footer / hotkeys ---------- */
 
 .term-foot {

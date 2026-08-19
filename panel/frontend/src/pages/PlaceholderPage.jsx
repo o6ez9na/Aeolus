@@ -17,20 +17,6 @@ export function PlaceholderPage({ title, planned }) {
   )
 }
 
-export function PkiPage() {
-  return (
-    <PlaceholderPage
-      title="pki"
-      planned={[
-        'создание и хранение CA панели',
-        'выпуск и отзыв клиентских сертификатов',
-        'генерация .ovpn с inline-сертификатами',
-        'публикация CRL на узлы через агента anemoi',
-      ]}
-    />
-  )
-}
-
 export function CcdPage() {
   return (
     <PlaceholderPage

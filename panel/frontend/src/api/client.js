@@ -105,6 +105,25 @@ export async function apiFetch(path, init = {}) {
   return response.json()
 }
 
+/**
+ * Fetch a file through the authorised API and hand it to the browser as a
+ * download. A plain <a href> cannot carry the bearer token.
+ */
+export async function authorizedDownload(path, filename) {
+  let response = await rawRequest(path, {}, accessToken)
+  if (response.status === 401 && getRefreshToken()) {
+    response = await rawRequest(path, {}, await refreshAccessToken())
+  }
+  if (!response.ok) throw new ApiError(response.status, await parseError(response))
+
+  const url = URL.createObjectURL(await response.blob())
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 export const api = {
   get: (path) => apiFetch(path),
   post: (path, body) =>

@@ -6,7 +6,8 @@ import { AppShell } from './components/AppShell'
 import { ClientsPage } from './pages/ClientsPage'
 import { LoginPage } from './pages/LoginPage'
 import { NodesPage } from './pages/NodesPage'
-import { AuditPage, CcdPage, PkiPage, TrafficPage } from './pages/PlaceholderPage'
+import { AuditPage, CcdPage, TrafficPage } from './pages/PlaceholderPage'
+import { PkiPage } from './pages/PkiPage'
 import { ThemeProvider } from './theme/ThemeContext'
 
 export default function App() {

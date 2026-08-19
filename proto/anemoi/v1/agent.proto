@@ -26,6 +26,8 @@ message ConfigResponse {
   bool unchanged = 1;
   string revision = 2;
   string server_conf = 3;
+  // Optional second listener, for networks that mangle UDP.
+  string server_conf_tcp = 10;
   string ca_pem = 4;
   string server_cert_pem = 5;
   string server_key_pem = 6;

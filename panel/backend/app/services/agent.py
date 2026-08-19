@@ -89,6 +89,11 @@ async def build_config(session: AsyncSession, node: Node) -> dict:
 
     payload = {
         "server_conf": openvpn.render_server_config(node),
+        "server_conf_tcp": (
+            openvpn.render_server_config(node, proto="tcp", port=node.tcp_port)
+            if node.tcp_port
+            else ""
+        ),
         "ca_pem": ca.cert_pem,
         "server_cert_pem": node.server_cert_pem,
         "server_key_pem": decrypt_secret(node.server_key_pem_encrypted),
@@ -100,7 +105,7 @@ async def build_config(session: AsyncSession, node: Node) -> dict:
     # The CRL carries a timestamp, so hashing it would change the revision on
     # every poll. Hash the parts that describe intent instead.
     digest = hashlib.sha256()
-    for key in ("server_conf", "ca_pem", "server_cert_pem", "tls_crypt_key"):
+    for key in ("server_conf", "server_conf_tcp", "ca_pem", "server_cert_pem", "tls_crypt_key"):
         digest.update(payload[key].encode())
     for name in sorted(ccd):
         digest.update(name.encode())

@@ -64,6 +64,7 @@ async def ensure_master_node(session: AsyncSession) -> None:
             role=NodeRole.master,
             openvpn_port=settings.master_openvpn_port,
             openvpn_proto=settings.master_openvpn_proto,
+            tcp_port=settings.master_tcp_port,
         )
         session.add(node)
         await session.flush()
@@ -75,6 +76,9 @@ async def ensure_master_node(session: AsyncSession) -> None:
         node.server_cert_serial = None
         node.server_cert_not_after = None
         logger.warning("Panel node address changed to %s, reissuing certificate", address)
+
+    if node.tcp_port != settings.master_tcp_port:
+        node.tcp_port = settings.master_tcp_port
 
     if node.server_cert_serial is None:
         await pki.issue_server_cert(session, node)

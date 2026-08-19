@@ -175,10 +175,18 @@ def apply_config(cfg: Config, response) -> bool:
     ccd_dir = cfg.config_dir / "ccd"
     ccd_dir.mkdir(exist_ok=True)
 
-    server_conf = cfg.config_dir / "server.conf"
-    restart_needed = (
-        not server_conf.exists() or server_conf.read_text() != response.server_conf
-    )
+    restart_needed = False
+    for name, wanted in (
+        ("server.conf", response.server_conf),
+        ("server-tcp.conf", response.server_conf_tcp),
+    ):
+        path = cfg.config_dir / name
+        if wanted:
+            restart_needed |= not path.exists() or path.read_text() != wanted
+        elif path.exists():
+            # The listener was turned off; stop supervising it.
+            path.unlink()
+            restart_needed = True
 
     files = {
         "server.conf": response.server_conf,
@@ -188,6 +196,9 @@ def apply_config(cfg: Config, response) -> bool:
         "tls-crypt.key": response.tls_crypt_key,
         "crl.pem": response.crl_pem,
     }
+    if response.server_conf_tcp:
+        files["server-tcp.conf"] = response.server_conf_tcp
+
     for name, content in files.items():
         path = cfg.config_dir / name
         if path.exists() and path.read_text() == content:

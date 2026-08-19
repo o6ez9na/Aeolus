@@ -68,9 +68,11 @@ services:
       net.ipv4.ip_forward: 1
     environment:
       AEOLUS_VPN_SUBNET: ${AEOLUS_VPN_SUBNET:-10.8.0.0}
+      AEOLUS_VPN_TCP_SUBNET: ${AEOLUS_VPN_TCP_SUBNET:-10.9.0.0}
       AEOLUS_VPN_MASK_BITS: ${AEOLUS_VPN_MASK_BITS:-24}
     ports:
       - "${AEOLUS_VPN_PORT:-1194}:1194/udp"
+      - "${AEOLUS_VPN_TCP_PORT:-8443}:8443/tcp"
     volumes:
       - openvpn-config:/etc/openvpn/aeolus
       # status.log lives here; the agent reads it to report sessions.

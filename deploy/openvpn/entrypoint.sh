@@ -3,6 +3,7 @@ set -e
 
 CONFIG_DIR=${AEOLUS_OPENVPN_CONFIG_DIR:-/etc/openvpn/aeolus}
 VPN_SUBNET=${AEOLUS_VPN_SUBNET:-10.8.0.0}
+VPN_TCP_SUBNET=${AEOLUS_VPN_TCP_SUBNET:-10.9.0.0}
 VPN_MASK=${AEOLUS_VPN_MASK_BITS:-24}
 RESTART_FLAG="$CONFIG_DIR/.restart"
 
@@ -27,24 +28,43 @@ fi
 # Clients leave through this container's own interface, which Docker then NATs
 # to the host. Keeping NAT in here means the host firewall is left alone.
 UPLINK=$(ip -4 route show default | awk '{print $5; exit}')
-if ! iptables -t nat -C POSTROUTING -s "$VPN_SUBNET/$VPN_MASK" -o "$UPLINK" -j MASQUERADE 2>/dev/null; then
-    iptables -t nat -A POSTROUTING -s "$VPN_SUBNET/$VPN_MASK" -o "$UPLINK" -j MASQUERADE
-fi
-iptables -A FORWARD -s "$VPN_SUBNET/$VPN_MASK" -j ACCEPT
-iptables -A FORWARD -d "$VPN_SUBNET/$VPN_MASK" -m state --state ESTABLISHED,RELATED -j ACCEPT
+for subnet in "$VPN_SUBNET/$VPN_MASK" "$VPN_TCP_SUBNET/$VPN_MASK"; do
+    if ! iptables -t nat -C POSTROUTING -s "$subnet" -o "$UPLINK" -j MASQUERADE 2>/dev/null; then
+        iptables -t nat -A POSTROUTING -s "$subnet" -o "$UPLINK" -j MASQUERADE
+    fi
+    iptables -A FORWARD -s "$subnet" -j ACCEPT
+    iptables -A FORWARD -d "$subnet" -m state --state ESTABLISHED,RELATED -j ACCEPT
+done
 
 mkdir -p /run/openvpn
 
 openvpn_pid=""
+openvpn_tcp_pid=""
 
 start_openvpn() {
     echo "starting openvpn on $UPLINK, NAT for $VPN_SUBNET/$VPN_MASK"
     openvpn --config "$CONFIG_DIR/server.conf" --cd "$CONFIG_DIR" &
     openvpn_pid=$!
+
+    # A second listener on TCP, for networks that pass the handshake and then
+    # drop the UDP flow.
+    openvpn_tcp_pid=""
+    if [ -f "$CONFIG_DIR/server-tcp.conf" ]; then
+        echo "starting openvpn tcp listener"
+        openvpn --config "$CONFIG_DIR/server-tcp.conf" --cd "$CONFIG_DIR" &
+        openvpn_tcp_pid=$!
+    fi
+}
+
+stop_openvpn() {
+    [ -n "$openvpn_pid" ] && kill "$openvpn_pid" 2>/dev/null || true
+    [ -n "$openvpn_tcp_pid" ] && kill "$openvpn_tcp_pid" 2>/dev/null || true
+    wait "$openvpn_pid" 2>/dev/null || true
+    wait "$openvpn_tcp_pid" 2>/dev/null || true
 }
 
 shutdown() {
-    [ -n "$openvpn_pid" ] && kill "$openvpn_pid" 2>/dev/null || true
+    stop_openvpn
     exit 0
 }
 trap shutdown TERM INT
@@ -59,10 +79,18 @@ while true; do
 
     # OpenVPN writes status.log mode 0600; the agent runs as another user and
     # only ever reads it. Re-apply on every pass because the file is recreated.
-    chmod 0644 /run/openvpn/status.log 2>/dev/null || true
+    chmod 0644 /run/openvpn/status.log /run/openvpn/status-tcp.log 2>/dev/null || true
 
     if ! kill -0 "$openvpn_pid" 2>/dev/null; then
         echo "openvpn exited, restarting" >&2
+        stop_openvpn
+        start_openvpn
+        continue
+    fi
+
+    if [ -n "$openvpn_tcp_pid" ] && ! kill -0 "$openvpn_tcp_pid" 2>/dev/null; then
+        echo "openvpn tcp listener exited, restarting" >&2
+        stop_openvpn
         start_openvpn
         continue
     fi
@@ -71,8 +99,7 @@ while true; do
     if [ "$current_flag" != "$seen_flag" ]; then
         seen_flag="$current_flag"
         echo "configuration changed, restarting openvpn"
-        kill "$openvpn_pid" 2>/dev/null || true
-        wait "$openvpn_pid" 2>/dev/null || true
+        stop_openvpn
         start_openvpn
     fi
 done

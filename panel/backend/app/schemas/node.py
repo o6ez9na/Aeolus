@@ -14,6 +14,7 @@ class NodeBase(BaseModel):
     agent_port: int = Field(default=50051, ge=1, le=65535)
     openvpn_port: int = Field(default=1194, ge=1, le=65535)
     openvpn_proto: str = Field(default="udp", pattern=r"^(udp|tcp)$")
+    tcp_port: int | None = Field(default=None, ge=1, le=65535)
     max_clients: int | None = Field(default=None, ge=1)
     bandwidth_capacity_mbps: int = Field(default=1000, ge=1)
 
@@ -29,6 +30,7 @@ class NodeUpdate(BaseModel):
     agent_port: int | None = Field(default=None, ge=1, le=65535)
     openvpn_port: int | None = Field(default=None, ge=1, le=65535)
     openvpn_proto: str | None = Field(default=None, pattern=r"^(udp|tcp)$")
+    tcp_port: int | None = Field(default=None, ge=1, le=65535)
     max_clients: int | None = Field(default=None, ge=1)
     bandwidth_capacity_mbps: int | None = Field(default=None, ge=1)
     is_enabled: bool | None = None

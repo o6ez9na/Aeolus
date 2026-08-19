@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     openvpn_config_dir: str = "/etc/openvpn/aeolus"
     vpn_subnet: str = "10.8.0.0"
     vpn_netmask: str = "255.255.255.0"
+    # The TCP listener needs a pool of its own; two OpenVPN instances cannot
+    # hand out the same addresses.
+    vpn_tcp_subnet: str = "10.9.0.0"
+    # Not 443: the panel's own HTTPS already owns that port on the same host.
+    master_tcp_port: int | None = 8443
     vpn_dns: str = "1.1.1.1"
     # Conservative enough for mobile carriers, which commonly cap the path at
     # ~1400 bytes and drop anything larger instead of fragmenting.

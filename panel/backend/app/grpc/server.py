@@ -52,6 +52,7 @@ class NodeAgentServicer(agent_pb2_grpc.NodeAgentServicer):
                 unchanged=False,
                 revision=payload["revision"],
                 server_conf=payload["server_conf"],
+                server_conf_tcp=payload["server_conf_tcp"],
                 ca_pem=payload["ca_pem"],
                 server_cert_pem=payload["server_cert_pem"],
                 server_key_pem=payload["server_key_pem"],

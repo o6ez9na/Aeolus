@@ -55,6 +55,11 @@ class Node(Base, UUIDMixin, TimestampMixin):
     openvpn_port: Mapped[int] = mapped_column(Integer, default=1194)
     openvpn_proto: Mapped[str] = mapped_column(String(3), default="udp")
 
+    # Second listener on TCP. Some mobile carriers pass an OpenVPN handshake and
+    # then drop the UDP flow, which looks like a tunnel that connects and then
+    # goes silent; TCP gives those clients a way through.
+    tcp_port: Mapped[int | None] = mapped_column(Integer)
+
     role: Mapped[NodeRole] = mapped_column(
         Enum(NodeRole, name="node_role"), default=NodeRole.slave
     )

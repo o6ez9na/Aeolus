@@ -17,7 +17,9 @@ services:
       retries: 10
 
   backend:
-    build: ./panel/backend
+    build:
+      context: .
+      dockerfile: panel/backend/Dockerfile
     restart: unless-stopped
     depends_on:
       postgres:
@@ -38,6 +40,7 @@ services:
       AEOLUS_VPN_SUBNET: ${AEOLUS_VPN_SUBNET:-10.8.0.0}
     expose:
       - "8000"
+      - "50051"
     volumes:
       # The backend writes the OpenVPN bundle the openvpn container consumes.
       - openvpn-config:/etc/openvpn/aeolus
@@ -70,7 +73,29 @@ services:
       - "${AEOLUS_VPN_PORT:-1194}:1194/udp"
     volumes:
       - openvpn-config:/etc/openvpn/aeolus
+      # status.log lives here; the agent reads it to report sessions.
+      - openvpn-run:/run/openvpn
+
+  # The panel's own node agent. Remote nodes run this same image against
+  # AEOLUS_DOMAIN with a token from the panel.
+  anemoi:
+    build:
+      context: .
+      dockerfile: anemoi/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      ANEMOI_PANEL: backend:50051
+      ANEMOI_PANEL_API: http://backend:8000
+      ANEMOI_INTERVAL: ${ANEMOI_INTERVAL:-15}
+    volumes:
+      - openvpn-config:/etc/openvpn/aeolus
+      - anemoi-state:/var/lib/anemoi
+      - openvpn-run:/run/openvpn:ro
 
 volumes:
   postgres-data:
   openvpn-config:
+  openvpn-run:
+  anemoi-state:

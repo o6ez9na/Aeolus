@@ -4,6 +4,7 @@ set -e
 CONFIG_DIR=${AEOLUS_OPENVPN_CONFIG_DIR:-/etc/openvpn/aeolus}
 VPN_SUBNET=${AEOLUS_VPN_SUBNET:-10.8.0.0}
 VPN_MASK=${AEOLUS_VPN_MASK_BITS:-24}
+RESTART_FLAG="$CONFIG_DIR/.restart"
 
 # The panel writes the bundle on startup, so the first boot can race it.
 attempt=0
@@ -34,5 +35,44 @@ iptables -A FORWARD -d "$VPN_SUBNET/$VPN_MASK" -m state --state ESTABLISHED,RELA
 
 mkdir -p /run/openvpn
 
-echo "starting openvpn on $UPLINK, NAT for $VPN_SUBNET/$VPN_MASK"
-exec openvpn --config "$CONFIG_DIR/server.conf" --cd "$CONFIG_DIR"
+openvpn_pid=""
+
+start_openvpn() {
+    echo "starting openvpn on $UPLINK, NAT for $VPN_SUBNET/$VPN_MASK"
+    openvpn --config "$CONFIG_DIR/server.conf" --cd "$CONFIG_DIR" &
+    openvpn_pid=$!
+}
+
+shutdown() {
+    [ -n "$openvpn_pid" ] && kill "$openvpn_pid" 2>/dev/null || true
+    exit 0
+}
+trap shutdown TERM INT
+
+start_openvpn
+seen_flag=$(cat "$RESTART_FLAG" 2>/dev/null || echo "")
+
+# The agent rewrites server.conf when the panel changes it and touches the flag.
+# The CRL and ccd are re-read by OpenVPN itself, so only server.conf needs this.
+while true; do
+    sleep 5
+
+    # OpenVPN writes status.log mode 0600; the agent runs as another user and
+    # only ever reads it. Re-apply on every pass because the file is recreated.
+    chmod 0644 /run/openvpn/status.log 2>/dev/null || true
+
+    if ! kill -0 "$openvpn_pid" 2>/dev/null; then
+        echo "openvpn exited, restarting" >&2
+        start_openvpn
+        continue
+    fi
+
+    current_flag=$(cat "$RESTART_FLAG" 2>/dev/null || echo "")
+    if [ "$current_flag" != "$seen_flag" ]; then
+        seen_flag="$current_flag"
+        echo "configuration changed, restarting openvpn"
+        kill "$openvpn_pid" 2>/dev/null || true
+        wait "$openvpn_pid" 2>/dev/null || true
+        start_openvpn
+    fi
+done

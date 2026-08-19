@@ -1,0 +1,97 @@
+import uuid
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.models.node import ClientStatus, NodeRole, NodeStatus
+
+
+class NodeBase(BaseModel):
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_.-]*$")
+    address: str = Field(min_length=1, max_length=255)
+    country_code: str | None = Field(default=None, min_length=2, max_length=2)
+    role: NodeRole = NodeRole.slave
+    agent_port: int = Field(default=50051, ge=1, le=65535)
+    openvpn_port: int = Field(default=1194, ge=1, le=65535)
+    openvpn_proto: str = Field(default="udp", pattern=r"^(udp|tcp)$")
+    max_clients: int | None = Field(default=None, ge=1)
+    bandwidth_capacity_mbps: int = Field(default=1000, ge=1)
+
+
+class NodeCreate(NodeBase):
+    pass
+
+
+class NodeUpdate(BaseModel):
+    address: str | None = Field(default=None, min_length=1, max_length=255)
+    country_code: str | None = Field(default=None, min_length=2, max_length=2)
+    role: NodeRole | None = None
+    agent_port: int | None = Field(default=None, ge=1, le=65535)
+    openvpn_port: int | None = Field(default=None, ge=1, le=65535)
+    openvpn_proto: str | None = Field(default=None, pattern=r"^(udp|tcp)$")
+    max_clients: int | None = Field(default=None, ge=1)
+    bandwidth_capacity_mbps: int | None = Field(default=None, ge=1)
+    is_enabled: bool | None = None
+
+
+class NodeRead(NodeBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    status: NodeStatus
+    status_message: str | None
+    last_seen_at: datetime | None
+    is_enabled: bool
+    sessions: int
+    bandwidth_mbps: int
+    rx_bytes: int
+    tx_bytes: int
+    server_cert_not_after: datetime | None
+    created_at: datetime
+
+
+class NodeSummary(BaseModel):
+    """Numbers for the header strip above the node table."""
+
+    nodes_total: int
+    nodes_online: int
+    sessions: int
+    rx_bytes: int
+    tx_bytes: int
+    failed_nodes: int
+    clients_total: int
+    clients_active: int
+
+
+class ClientRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    common_name: str
+    label: str | None
+    status: ClientStatus
+    expires_at: datetime | None
+    traffic_limit_bytes: int | None
+    traffic_used_bytes: int
+    cert_serial: str | None
+    cert_not_after: datetime | None
+    last_seen_at: datetime | None
+    last_node_id: uuid.UUID | None
+    created_at: datetime
+    node_ids: list[uuid.UUID] = []
+
+
+class ClientCreate(BaseModel):
+    common_name: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_.-]+$")
+    label: str | None = Field(default=None, max_length=128)
+    expires_at: datetime | None = None
+    traffic_limit_bytes: int | None = Field(default=None, ge=0)
+    node_ids: list[uuid.UUID] = []
+
+
+class ClientUpdate(BaseModel):
+    label: str | None = Field(default=None, max_length=128)
+    status: ClientStatus | None = None
+    expires_at: datetime | None = None
+    traffic_limit_bytes: int | None = Field(default=None, ge=0)
+    node_ids: list[uuid.UUID] | None = None

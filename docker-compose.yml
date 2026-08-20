@@ -45,6 +45,9 @@ services:
     volumes:
       # The backend writes the OpenVPN bundle the openvpn container consumes.
       - openvpn-config:/etc/openvpn/aeolus
+      # Read-only: the panel reads the transit session list to tell whether a
+      # node is really reachable, rather than whether its agent is answering.
+      - openvpn-run:/run/openvpn:ro
 
   frontend:
     build: ./panel/frontend

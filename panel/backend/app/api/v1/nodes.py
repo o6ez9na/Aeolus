@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, OperatorUser, SessionDep
+from app.core.config import settings
 from app.models.node import Client, ClientStatus, Node, NodeApproval, NodeStatus
 from app.schemas.node import (
     EnrollmentToken,
@@ -27,6 +28,13 @@ async def list_nodes(session: SessionDep, _: CurrentUser) -> list[NodeRead]:
         data = NodeRead.model_validate(node)
         # The hub is not its own transit peer; it is always reachable to itself.
         data.transit_connected = node.is_hub or node.name in connected
+        data.transit_transport = (
+            ""
+            if node.is_hub
+            else "ws/443"
+            if node.transit_obfuscated
+            else f"{settings.vpn_transit_proto}/{settings.vpn_transit_port}"
+        )
         nodes.append(data)
     return nodes
 

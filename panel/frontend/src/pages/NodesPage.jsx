@@ -93,7 +93,17 @@ function NodeRow({ node, canEdit, onToggle, onDelete, onObfuscate }) {
       </span>
       <span className="muted">{node.address}</span>
       <span className="muted">
-        {node.openvpn_proto}/{node.openvpn_port}
+        {node.is_hub ? (
+          <>
+            {node.openvpn_proto}/{node.openvpn_port}
+            {node.tcp_port && <div className="sub">tcp/{node.tcp_port}</div>}
+          </>
+        ) : (
+          <>
+            {node.transit_transport}
+            <div className="sub">транзит до панели</div>
+          </>
+        )}
       </span>
       {node.role === 'master' ? (
         <span className="chip">master</span>

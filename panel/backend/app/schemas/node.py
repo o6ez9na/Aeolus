@@ -71,6 +71,9 @@ class NodeRead(NodeBase):
     # whether its agent is answering.
     transit_connected: bool = False
     transit_obfuscated: bool = False
+    # How this node reaches the hub, as opposed to the client listener fields
+    # above, which only the hub itself still uses.
+    transit_transport: str = ""
 
     @field_validator("subnets", mode="before")
     @classmethod

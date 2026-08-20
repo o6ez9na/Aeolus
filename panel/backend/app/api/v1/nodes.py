@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
@@ -13,7 +13,7 @@ from app.schemas.node import (
     NodeSummary,
     NodeUpdate,
 )
-from app.services import agent
+from app.services import agent, audit
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 
@@ -61,14 +61,28 @@ async def node_summary(session: SessionDep, _: CurrentUser) -> NodeSummary:
 
 
 @router.post("", response_model=NodeRead, status_code=status.HTTP_201_CREATED)
-async def create_node(body: NodeCreate, session: SessionDep, _: OperatorUser) -> Node:
+async def create_node(
+    body: NodeCreate, request: Request, session: SessionDep, user: OperatorUser
+) -> Node:
     node = Node(**body.model_dump())
     session.add(node)
     try:
-        await session.commit()
+        await session.flush()
     except IntegrityError:
         await session.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Node name already taken") from None
+
+    await audit.record(
+        session,
+        "node.create",
+        actor=user,
+        request=request,
+        target_type="node",
+        target_id=node.id,
+        target_label=node.name,
+        detail={"address": node.address, "role": node.role.value},
+    )
+    await session.commit()
     await session.refresh(node)
     return node
 
@@ -87,11 +101,27 @@ async def get_node(node_id: uuid.UUID, session: SessionDep, _: CurrentUser) -> N
 
 @router.patch("/{node_id}", response_model=NodeRead)
 async def update_node(
-    node_id: uuid.UUID, body: NodeUpdate, session: SessionDep, _: OperatorUser
+    node_id: uuid.UUID,
+    body: NodeUpdate,
+    request: Request,
+    session: SessionDep,
+    user: OperatorUser,
 ) -> Node:
     node = await _get_node(session, node_id)
-    for field, value in body.model_dump(exclude_unset=True).items():
+    changes = body.model_dump(exclude_unset=True)
+    for field, value in changes.items():
         setattr(node, field, value)
+
+    await audit.record(
+        session,
+        "node.update",
+        actor=user,
+        request=request,
+        target_type="node",
+        target_id=node.id,
+        target_label=node.name,
+        detail=audit.changed_fields(changes),
+    )
     await session.commit()
     await session.refresh(node)
     return node
@@ -99,7 +129,7 @@ async def update_node(
 
 @router.post("/{node_id}/enrollment-token", response_model=EnrollmentToken)
 async def create_enrollment_token(
-    node_id: uuid.UUID, session: SessionDep, _: OperatorUser
+    node_id: uuid.UUID, request: Request, session: SessionDep, user: OperatorUser
 ) -> EnrollmentToken:
     """Mint a one-time token for this node's agent.
 
@@ -107,6 +137,16 @@ async def create_enrollment_token(
     """
     node = await _get_node(session, node_id)
     token = await agent.issue_enrollment_token(session, node)
+    await audit.record(
+        session,
+        "node.enrollment_token",
+        actor=user,
+        request=request,
+        target_type="node",
+        target_id=node.id,
+        target_label=node.name,
+        detail={"expires_at": node.enrollment_token_expires_at},
+    )
     await session.commit()
     return EnrollmentToken(
         token=token,
@@ -116,7 +156,19 @@ async def create_enrollment_token(
 
 
 @router.delete("/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_node(node_id: uuid.UUID, session: SessionDep, _: OperatorUser) -> None:
+async def delete_node(
+    node_id: uuid.UUID, request: Request, session: SessionDep, user: OperatorUser
+) -> None:
     node = await _get_node(session, node_id)
+    await audit.record(
+        session,
+        "node.delete",
+        actor=user,
+        request=request,
+        target_type="node",
+        target_id=node.id,
+        target_label=node.name,
+        detail={"address": node.address},
+    )
     await session.delete(node)
     await session.commit()

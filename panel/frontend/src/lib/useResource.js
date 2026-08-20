@@ -6,6 +6,9 @@ import { api } from '../api/client'
  * GET a path, with a manual `reload` and an optional poll interval.
  * `stale` stays true while a refresh is in flight so the UI can dim instead of
  * flashing an empty table.
+ *
+ * A null path fetches nothing, which lets a caller hold the hook while it knows
+ * the request would be refused anyway.
  */
 export function useResource(path, { pollMs = 0 } = {}) {
   const [data, setData] = useState(null)
@@ -16,6 +19,10 @@ export function useResource(path, { pollMs = 0 } = {}) {
 
   const load = useCallback(
     async ({ quiet = false } = {}) => {
+      if (!path) {
+        setLoading(false)
+        return
+      }
       if (quiet) setStale(true)
       try {
         const result = await api.get(path)

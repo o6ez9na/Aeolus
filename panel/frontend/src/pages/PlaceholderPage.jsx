@@ -42,16 +42,3 @@ export function TrafficPage() {
     />
   )
 }
-
-export function AuditPage() {
-  return (
-    <PlaceholderPage
-      title="аудит"
-      planned={[
-        'журнал действий операторов',
-        'входы и отзывы сессий',
-        'события выпуска и отзыва сертификатов',
-      ]}
-    />
-  )
-}

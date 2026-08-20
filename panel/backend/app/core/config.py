@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     # subnet; it exists so the hub can forward a client into a node's exit.
     vpn_transit_subnet: str = "10.10.0.0"
     vpn_transit_port: int = 1195
+    # Some networks pass an OpenVPN handshake and then quietly police the UDP
+    # flow that follows: the tunnel connects, goes silent, and restarts on the
+    # inactivity timer forever. Nodes on such a network need the same escape
+    # hatch clients already have.
+    vpn_transit_proto: str = "udp"
 
     vpn_dns: str = "1.1.1.1"
     # Fixed addresses are handed out below the dynamic pool, so a pinned client

@@ -60,6 +60,9 @@ class NodeAgentServicer(agent_pb2_grpc.NodeAgentServicer):
                 crl_pem=payload["crl_pem"],
                 ccd=payload["ccd"],
                 ccd_tcp=payload["ccd_tcp"],
+                transit_conf=payload["transit_conf"],
+                ccd_transit=payload["ccd_transit"],
+                is_hub=payload["is_hub"],
             )
 
     async def ReportStatus(self, request, context):

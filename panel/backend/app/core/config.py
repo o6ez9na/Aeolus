@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     vpn_tcp_subnet: str = "10.9.0.0"
     # Not 443: the panel's own HTTPS already owns that port on the same host.
     master_tcp_port: int | None = 8443
+    # Transit: the tunnel every node dials into. Clients never touch this
+    # subnet; it exists so the hub can forward a client into a node's exit.
+    vpn_transit_subnet: str = "10.10.0.0"
+    vpn_transit_port: int = 1195
+
     vpn_dns: str = "1.1.1.1"
     # Fixed addresses are handed out below the dynamic pool, so a pinned client
     # can never collide with one OpenVPN assigns on its own.

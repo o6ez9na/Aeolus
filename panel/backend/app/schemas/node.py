@@ -1,9 +1,9 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.node import ClientStatus, NodeRole, NodeStatus
+from app.models.node import ClientStatus, NodeApproval, NodeRole, NodeStatus
 
 
 class NodeBase(BaseModel):
@@ -55,6 +55,25 @@ class NodeRead(NodeBase):
     config_revision: str | None
     created_at: datetime
 
+    # Membership, as opposed to reachability: a node can be online and still be
+    # waiting for someone to accept it.
+    approval: NodeApproval
+    approved_at: datetime | None = None
+    is_hub: bool = False
+    hostname: str | None = None
+    announce_ip: str | None = None
+    wan_iface: str | None = None
+    subnets: list[str] = []
+    key_fingerprint: str | None = None
+    transit_host: int | None = None
+
+    @field_validator("subnets", mode="before")
+    @classmethod
+    def _no_subnets_is_empty(cls, value: list[str] | None) -> list[str]:
+        # NULL in the column means "never announced any", which the UI renders
+        # the same way as an empty list.
+        return value or []
+
 
 class EnrollmentToken(BaseModel):
     """Returned once, at creation time."""
@@ -67,6 +86,7 @@ class EnrollmentToken(BaseModel):
 class NodeSummary(BaseModel):
     """Numbers for the header strip above the node table."""
 
+    nodes_pending: int = 0
     nodes_total: int
     nodes_online: int
     sessions: int

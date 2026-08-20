@@ -37,6 +37,14 @@ message ConfigResponse {
   // listeners hand out addresses from two different subnets.
   map<string, string> ccd = 9;
   map<string, string> ccd_tcp = 11;
+
+  // Transit tunnel between the hub and this node: the listener when this node
+  // is the hub, the client config that dials it otherwise.
+  string transit_conf = 12;
+  // Hub only: one entry per node, carrying its fixed address and the LANs
+  // behind it.
+  map<string, string> ccd_transit = 13;
+  bool is_hub = 14;
 }
 
 message Session {

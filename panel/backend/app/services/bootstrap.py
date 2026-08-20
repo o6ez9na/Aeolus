@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import hash_password
-from app.models.node import Node, NodeRole
+from app.models.node import Node, NodeApproval, NodeRole
 from app.models.user import User, UserRole
 from app.services import agent, openvpn, pki
 
@@ -62,6 +62,10 @@ async def ensure_master_node(session: AsyncSession) -> None:
             name=settings.master_node_name,
             address=address,
             role=NodeRole.master,
+            # The panel host is the hub and needs no operator to accept it: it
+            # is the machine the operator is already logged in to.
+            is_hub=True,
+            approval=NodeApproval.approved,
             openvpn_port=settings.master_openvpn_port,
             openvpn_proto=settings.master_openvpn_proto,
             tcp_port=settings.master_tcp_port,
@@ -79,6 +83,10 @@ async def ensure_master_node(session: AsyncSession) -> None:
 
     if node.tcp_port != settings.master_tcp_port:
         node.tcp_port = settings.master_tcp_port
+
+    # Older deployments created this row before either flag existed.
+    node.is_hub = True
+    node.approval = NodeApproval.approved
 
     if node.server_cert_serial is None:
         await pki.issue_server_cert(session, node)

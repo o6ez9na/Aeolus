@@ -73,6 +73,8 @@ services:
     ports:
       - "${AEOLUS_VPN_PORT:-1194}:1194/udp"
       - "${AEOLUS_VPN_TCP_PORT:-8443}:8443/tcp"
+      # Transit: nodes dial this one, clients never do.
+      - "${AEOLUS_VPN_TRANSIT_PORT:-1195}:1195/udp"
     volumes:
       - openvpn-config:/etc/openvpn/aeolus
       # status.log lives here; the agent reads it to report sessions.

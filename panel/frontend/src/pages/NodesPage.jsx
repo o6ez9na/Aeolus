@@ -24,6 +24,44 @@ function NodeSubline({ node }) {
   return <div className="sub">{node.status === 'unknown' ? 'агент не подключался' : ''}</div>
 }
 
+/** A node that announced itself and is waiting for someone to accept it. */
+function PendingRow({ node, canEdit, busy, onApprove, onReject }) {
+  return (
+    <div className="pending-card">
+      <div className="pending-head">
+        <span className="name">{node.name}</span>
+        <span className="sub">
+          {node.hostname || 'без имени хоста'} · {node.announce_ip || 'адрес неизвестен'}
+          {node.agent_version && ` · anemoi ${node.agent_version}`}
+        </span>
+      </div>
+
+      <div className="field">
+        отпечаток ключа — сверь с тем, что агент напечатал на самой ноде
+        <code className="fingerprint">{node.key_fingerprint}</code>
+      </div>
+
+      <div className="field">
+        сети за узлом
+        <span className="muted">
+          {node.subnets.length ? node.subnets.join(', ') : 'не объявлены'}
+        </span>
+      </div>
+
+      {canEdit && (
+        <div className="pending-actions">
+          <button className="btn" disabled={busy} onClick={() => onApprove(node)}>
+            принять
+          </button>
+          <button className="btn ghost" disabled={busy} onClick={() => onReject(node)}>
+            отклонить
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function NodeRow({ node, canEdit, onToggle, onDelete }) {
   const bar = meter(node.bandwidth_mbps, node.bandwidth_capacity_mbps)
 
@@ -126,11 +164,45 @@ export function NodesPage() {
     await refreshAll()
   }
 
+  async function decide(node, verdict) {
+    setBusy(true)
+    setFormError(null)
+    try {
+      await api.post(`/nodes/${node.id}/${verdict}`)
+      await refreshAll()
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Не удалось применить решение')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (loading) return <div className="empty">загрузка узлов…</div>
   if (error) return <div className="empty form-error">{error}</div>
 
+  const pending = nodes.filter((node) => node.approval === 'pending')
+  const members = nodes.filter((node) => node.approval !== 'pending')
+
   return (
     <>
+      {pending.length > 0 && (
+        <div className="pending-block">
+          <div className="sub" style={{ marginBottom: 10 }}>
+            заявки на подключение — узел ничего не получает, пока его не принять
+          </div>
+          {pending.map((node) => (
+            <PendingRow
+              key={node.id}
+              node={node}
+              canEdit={canEdit}
+              busy={busy}
+              onApprove={(n) => decide(n, 'approve')}
+              onReject={(n) => decide(n, 'reject')}
+            />
+          ))}
+        </div>
+      )}
+
       <div className="row head">
         <span />
         <span className="dim">узел</span>
@@ -143,13 +215,13 @@ export function NodesPage() {
         <span />
       </div>
 
-      {nodes.length === 0 && (
+      {members.length === 0 && (
         <div className="empty">
           узлов нет. {canEdit ? 'нажми n или «добавить узел».' : 'обратись к оператору.'}
         </div>
       )}
 
-      {nodes.map((node) => (
+      {members.map((node) => (
         <NodeRow
           key={node.id}
           node={node}

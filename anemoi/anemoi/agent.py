@@ -7,6 +7,7 @@ Loop: pull configuration, write it to disk when the revision changed, restart
 OpenVPN if the server config itself changed, then report what OpenVPN is doing.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -47,6 +48,12 @@ class Config:
     token_file: Path = field(default_factory=lambda: Path(
         os.environ.get("ANEMOI_TOKEN_FILE", "/etc/openvpn/aeolus/.enrollment-token")
     ))
+    # What the node calls itself in the join request. The panel sanitises it and
+    # may rename on collision; the certificate carries the panel's choice.
+    node_name: str = os.environ.get("ANEMOI_NODE_NAME", "")
+    # LANs this node exposes to the mesh, comma separated CIDRs.
+    subnets: str = os.environ.get("ANEMOI_SUBNETS", "")
+    wan_iface: str = os.environ.get("ANEMOI_WAN_IFACE", "")
     state_dir: Path = Path(os.environ.get("ANEMOI_STATE_DIR", "/var/lib/anemoi"))
     config_dir: Path = Path(os.environ.get("ANEMOI_CONFIG_DIR", "/etc/openvpn/aeolus"))
     status_file: Path = Path(
@@ -67,6 +74,8 @@ class Enrolment:
         self.cert_path = state_dir / "agent.crt"
         self.ca_path = state_dir / "ca.crt"
         self.name_path = state_dir / "node-name"
+        # Written while a join request is waiting for an operator.
+        self.announce_path = state_dir / "announce-token"
 
     @property
     def complete(self) -> bool:
@@ -82,16 +91,28 @@ class Enrolment:
         )
 
     def create_csr(self, common_name: str = "pending") -> str:
-        key = ec.generate_private_key(ec.SECP256R1())
+        """Build a CSR, reusing the key we already have.
+
+        The key is this node's identity: the panel dedupes join requests by its
+        fingerprint, and an operator may already be looking at that fingerprint
+        on screen. Generating a fresh one on every retry would queue a new
+        request each time and invalidate what they are comparing.
+        """
         self.key_path.parent.mkdir(parents=True, exist_ok=True)
-        self.key_path.write_bytes(
-            key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
+        if self.key_path.exists():
+            key = serialization.load_pem_private_key(
+                self.key_path.read_bytes(), password=None
             )
-        )
-        self.key_path.chmod(0o600)
+        else:
+            key = ec.generate_private_key(ec.SECP256R1())
+            self.key_path.write_bytes(
+                key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption(),
+                )
+            )
+            self.key_path.chmod(0o600)
 
         csr = (
             x509.CertificateSigningRequestBuilder()
@@ -106,51 +127,150 @@ class Enrolment:
         self.cert_path.write_text(cert_pem)
         self.ca_path.write_text(ca_pem)
         self.name_path.write_text(node_name)
+        self.announce_path.unlink(missing_ok=True)
+
+    def fingerprint(self) -> str:
+        """SHA-256 of our public key, formatted the way the panel shows it.
+
+        This is what an operator compares before accepting the node, so it is
+        printed on every start while the request is pending.
+        """
+        key = serialization.load_pem_private_key(
+            self.key_path.read_bytes(), password=None
+        )
+        der = key.public_key().public_bytes(
+            serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        digest = hashlib.sha256(der).hexdigest()
+        return ":".join(digest[i : i + 2] for i in range(0, len(digest), 2))
 
 
-def enroll(cfg: Config, enrolment: Enrolment) -> None:
-    """Trade the one-time token for a certificate over the panel's HTTPS API.
+def _api(cfg: Config, path: str, body: dict | None = None) -> dict:
+    """Call the panel's HTTPS API. Raises OSError / HTTPError on failure."""
+    data = None if body is None else json.dumps(body).encode()
+    request = urllib.request.Request(
+        f"{cfg.panel_api.rstrip('/')}{path}",
+        data=data,
+        headers={"Content-Type": "application/json"} if data else {},
+        method="POST" if data else "GET",
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.load(response)
 
-    This is the only exchange that happens before the agent has credentials, so
-    it deliberately does not use the gRPC endpoint: that one is signed by the
-    Aeolus CA, which a fresh node has no way to verify yet.
+
+def _local_subnets(cfg: Config) -> list[str]:
+    """LANs this node exposes. Explicit configuration wins over guessing."""
+    if cfg.subnets:
+        return [part.strip() for part in cfg.subnets.split(",") if part.strip()]
+    return []
+
+
+def announce(cfg: Config, enrolment: Enrolment) -> str | None:
+    """Ask the panel to join. Returns the poll token, or None if it refused.
+
+    Nothing here is authenticated — a fresh node has no credential to present.
+    The request stays inert until an operator compares the fingerprint we print
+    below with the one the panel shows, and accepts it.
+    """
+    csr_pem = enrolment.create_csr(cfg.node_name or os.uname().nodename)
+    body = {
+        "csr_pem": csr_pem,
+        "name": cfg.node_name or os.uname().nodename,
+        "hostname": os.uname().nodename,
+        "wan_iface": cfg.wan_iface,
+        "subnets": _local_subnets(cfg),
+        "agent_version": VERSION,
+    }
+    try:
+        payload = _api(cfg, "/api/v1/agents/announce", body)
+    except urllib.error.HTTPError as exc:
+        logger.error("announce refused: %s %s", exc.code, exc.read().decode()[:200])
+        return None
+    except OSError as exc:
+        logger.error("cannot reach the panel API at %s: %s", cfg.panel_api, exc)
+        return None
+
+    enrolment.announce_path.write_text(payload["poll_token"])
+    logger.warning(
+        "join request sent as %r. Accept it in the panel; the fingerprint must read:\n    %s",
+        payload["node_name"],
+        payload["fingerprint"],
+    )
+    return payload["poll_token"]
+
+
+def collect(cfg: Config, enrolment: Enrolment, token: str) -> bool:
+    """Poll the panel for the decision. True once we hold a certificate."""
+    try:
+        payload = _api(cfg, f"/api/v1/agents/announce/{token}")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            # The request was forgotten on the panel side; ask again.
+            enrolment.announce_path.unlink(missing_ok=True)
+        logger.warning("poll refused: %s", exc.code)
+        return False
+    except OSError as exc:
+        logger.warning("cannot reach the panel API: %s", exc)
+        return False
+
+    if payload["status"] != "approved" or not payload.get("cert_pem"):
+        logger.info("waiting to be accepted (state: %s)", payload["status"])
+        return False
+
+    enrolment.save(payload["cert_pem"], payload["ca_pem"], payload["node_name"])
+    logger.warning("accepted as node %r", payload["node_name"])
+    return True
+
+
+def join(cfg: Config, enrolment: Enrolment) -> bool:
+    """Get this node from "nothing" to "holds a certificate". One pass."""
+    if cfg.token or cfg.token_file.exists():
+        # A token means the panel provisioned this node itself, which is how the
+        # panel's own agent starts without a human in the loop.
+        return enroll_with_token(cfg, enrolment)
+
+    token = ""
+    if enrolment.announce_path.exists():
+        token = enrolment.announce_path.read_text().strip()
+    if not token:
+        token = announce(cfg, enrolment) or ""
+    if not token:
+        return False
+    return collect(cfg, enrolment, token)
+
+
+def enroll_with_token(cfg: Config, enrolment: Enrolment) -> bool:
+    """Trade a one-time token for a certificate.
+
+    Kept for the panel's own node: the panel drops a token in the shared volume,
+    so the machine the operator is already logged in to does not queue a request
+    against itself.
     """
     if not cfg.token and cfg.token_file.exists():
         cfg.token = cfg.token_file.read_text().strip()
-
     if not cfg.token:
-        logger.error(
-            "no certificate yet and no enrolment token; issue one for this node "
-            "in the panel and pass it as ANEMOI_ENROLLMENT_TOKEN"
-        )
-        sys.exit(1)
+        return False
 
     csr_pem = enrolment.create_csr()
-    body = json.dumps(
-        {"token": cfg.token, "csr_pem": csr_pem, "agent_version": VERSION}
-    ).encode()
-
-    request = urllib.request.Request(
-        f"{cfg.panel_api.rstrip('/')}/api/v1/agents/enroll",
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.load(response)
+        payload = _api(
+            cfg,
+            "/api/v1/agents/enroll",
+            {"token": cfg.token, "csr_pem": csr_pem, "agent_version": VERSION},
+        )
     except urllib.error.HTTPError as exc:
         logger.error("enrolment refused: %s %s", exc.code, exc.read().decode()[:200])
-        sys.exit(1)
+        return False
     except OSError as exc:
         logger.error("cannot reach the panel API at %s: %s", cfg.panel_api, exc)
-        sys.exit(1)
+        return False
 
     enrolment.save(payload["cert_pem"], payload["ca_pem"], payload["node_name"])
     # The token is spent; leaving it on disk only widens the window for reuse.
     cfg.token_file.unlink(missing_ok=True)
     logger.info("enrolled as node %r", payload["node_name"])
+    return True
 
 
 def _target_name(panel: str) -> str:
@@ -177,6 +297,7 @@ def apply_config(cfg: Config, response) -> bool:
     for name, wanted in (
         ("server.conf", response.server_conf),
         ("server-tcp.conf", response.server_conf_tcp),
+        ("transit.conf", response.transit_conf),
     ):
         path = cfg.config_dir / name
         if wanted:
@@ -196,17 +317,34 @@ def apply_config(cfg: Config, response) -> bool:
     }
     if response.server_conf_tcp:
         files["server-tcp.conf"] = response.server_conf_tcp
+    if response.transit_conf:
+        files["transit.conf"] = response.transit_conf
+        if not response.is_hub:
+            # A node dials the hub as an OpenVPN client, and authenticates with
+            # the same certificate it uses for gRPC: one identity per node.
+            state = Enrolment(cfg.state_dir)
+            files["transit.crt"] = state.cert_path.read_text()
+            files["transit.key"] = state.key_path.read_text()
 
     for name, content in files.items():
         path = cfg.config_dir / name
         if path.exists() and path.read_text() == content:
             continue
         path.write_text(content)
-        path.chmod(0o600 if name in {"server.key", "tls-crypt.key"} else 0o644)
+        path.chmod(
+            0o600
+            if name in {"server.key", "tls-crypt.key", "transit.key"}
+            else 0o644
+        )
 
     # One directory per listener: a pinned client has a different address on the
-    # UDP and the TCP subnet, so the entries are not interchangeable.
-    for dirname, entries in (("ccd", response.ccd), ("ccd-tcp", response.ccd_tcp)):
+    # UDP and the TCP subnet, so the entries are not interchangeable. The hub
+    # additionally keeps one per node, holding its transit address and LANs.
+    for dirname, entries in (
+        ("ccd", response.ccd),
+        ("ccd-tcp", response.ccd_tcp),
+        ("ccd-transit", response.ccd_transit),
+    ):
         ccd_dir = cfg.config_dir / dirname
         ccd_dir.mkdir(exist_ok=True)
         # A stale ccd entry would keep granting access after the panel took it
@@ -233,7 +371,13 @@ def run() -> None:
     enrolment = Enrolment(cfg.state_dir)
 
     if not enrolment.complete:
-        enroll(cfg, enrolment)
+        if not join(cfg, enrolment):
+            # Nothing else can happen until an operator accepts this node, so
+            # keep asking rather than exiting and losing the request.
+            while not enrolment.complete:
+                time.sleep(cfg.interval)
+                if join(cfg, enrolment):
+                    break
 
     running = True
 

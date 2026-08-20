@@ -5,6 +5,7 @@ from app.models.node import (
     ClientNodeGrant,
     ClientStatus,
     Node,
+    NodeApproval,
     NodeRole,
     NodeStatus,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "ClientNodeGrant",
     "ClientStatus",
     "Node",
+    "NodeApproval",
     "NodeRole",
     "NodeStatus",
     "RefreshToken",

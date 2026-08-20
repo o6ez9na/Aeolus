@@ -34,6 +34,18 @@ class NodeRole(str, enum.Enum):
     slave = "slave"
 
 
+class NodeApproval(str, enum.Enum):
+    """Whether an operator has accepted this node into the mesh.
+
+    A node announces itself, so the row exists before anyone has agreed to it.
+    Nothing is issued and nothing is routed until the state is `approved`.
+    """
+
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
 class Node(Base, UUIDMixin, TimestampMixin):
     """An `anemoi` agent host running OpenVPN, reachable over gRPC + mTLS."""
 
@@ -43,6 +55,43 @@ class Node(Base, UUIDMixin, TimestampMixin):
     address: Mapped[str] = mapped_column(String(255))  # hostname or IP clients dial
     country_code: Mapped[str | None] = mapped_column(String(2))
     agent_port: Mapped[int] = mapped_column(Integer, default=50051)
+
+    # Where this node sits in the mesh. The panel host is the hub: clients dial
+    # it, and it forwards them into the transit tunnel of whichever node they
+    # are allowed to exit through.
+    is_hub: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    approval: Mapped[NodeApproval] = mapped_column(
+        Enum(NodeApproval, name="node_approval"), default=NodeApproval.pending
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approved_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+    # What the node said about itself when it announced. Advisory: an announce is
+    # unauthenticated until an operator accepts it.
+    hostname: Mapped[str | None] = mapped_column(String(255))
+    announce_ip: Mapped[str | None] = mapped_column(String(45))
+    wan_iface: Mapped[str | None] = mapped_column(String(32))
+    # LANs behind this node, as CIDR strings. Routed into its transit tunnel.
+    subnets: Mapped[list[str] | None] = mapped_column(JSON)
+
+    # SHA-256 of the agent's public key. The agent prints the same value on the
+    # node, so an operator can compare the two before accepting a request.
+    key_fingerprint: Mapped[str | None] = mapped_column(String(95), index=True)
+
+    # Kept from the announcement so the certificate can be signed at the moment
+    # of approval, and handed back the next time the agent polls.
+    announce_csr_pem: Mapped[str | None] = mapped_column(Text)
+    agent_cert_pem: Mapped[str | None] = mapped_column(Text)
+
+    # Host part of this node's address inside the transit subnet.
+    transit_host: Mapped[int | None] = mapped_column(Integer, unique=True)
+
+    # Handed to the agent when it announces, so it can poll for the decision
+    # without holding any other credential yet. Stored hashed.
+    announce_token_hash: Mapped[str | None] = mapped_column(String(64), index=True)
 
     # Agent enrolment. The token is stored hashed: it is a credential, and the
     # panel only ever needs to compare it.

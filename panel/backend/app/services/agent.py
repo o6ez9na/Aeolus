@@ -5,16 +5,26 @@ Kept separate from the gRPC plumbing so it can be exercised without a channel.
 
 import hashlib
 import logging
+import re
 import secrets
 from datetime import UTC, datetime, timedelta
 
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.crypto import decrypt_secret
-from app.models.node import Client, ClientStatus, Node, NodeStatus
+from app.models.node import (
+    Client,
+    ClientStatus,
+    Node,
+    NodeApproval,
+    NodeRole,
+    NodeStatus,
+)
 from app.services import ccd as ccd_service
 from app.services import openvpn, pki
 
@@ -37,6 +47,162 @@ async def issue_enrollment_token(session: AsyncSession, node: Node) -> str:
     node.enrollment_token_hash = hash_token(token)
     node.enrollment_token_expires_at = datetime.now(UTC) + TOKEN_TTL
     return token
+
+
+def csr_fingerprint(csr_pem: str) -> str:
+    """SHA-256 of the public key inside a CSR, in colon-separated hex.
+
+    The agent derives the same value from its own key and prints it, so an
+    operator accepting a request can compare two strings rather than trusting
+    whatever name the request claimed.
+    """
+    try:
+        csr = x509.load_pem_x509_csr(csr_pem.encode())
+    except ValueError as exc:
+        raise AgentError(f"malformed CSR: {exc}") from None
+    if not csr.is_signature_valid:
+        raise AgentError("CSR signature does not verify")
+
+    der = csr.public_key().public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    digest = hashlib.sha256(der).hexdigest()
+    return ":".join(digest[i : i + 2] for i in range(0, len(digest), 2))
+
+
+def _clean_name(raw: str) -> str:
+    """A node name safe to use as a certificate CN and a ccd file name."""
+    name = re.sub(r"[^a-z0-9_.-]+", "-", raw.strip().lower()).strip("-.")
+    return name[:64] or "node"
+
+
+async def _unique_name(session: AsyncSession, wanted: str) -> str:
+    name = _clean_name(wanted)
+    taken = set(
+        await session.scalars(select(Node.name).where(Node.name.startswith(name)))
+    )
+    if name not in taken:
+        return name
+    for suffix in range(2, 100):
+        candidate = f"{name}-{suffix}"
+        if candidate not in taken:
+            return candidate
+    return f"{name}-{secrets.token_hex(3)}"
+
+
+async def announce(
+    session: AsyncSession,
+    *,
+    csr_pem: str,
+    name: str,
+    hostname: str | None,
+    wan_iface: str | None,
+    subnets: list[str],
+    agent_version: str,
+    source_ip: str | None,
+) -> tuple[Node, str, str]:
+    """Register or refresh a node's request to join. Returns (node, token, fp).
+
+    Deliberately unauthenticated, like the enrolment it replaces: a fresh node
+    has no credential to present. The request is inert — no certificate, no
+    address, no routing — until an operator accepts the fingerprint.
+    """
+    fingerprint = csr_fingerprint(csr_pem)
+
+    # Identity is the key, not the name: an agent that re-announces after a
+    # restart must land on its own row instead of queueing a second request.
+    node = await session.scalar(
+        select(Node).where(Node.key_fingerprint == fingerprint)
+    )
+    if node is None:
+        node = Node(
+            name=await _unique_name(session, name or hostname or "node"),
+            address=source_ip or (hostname or ""),
+            key_fingerprint=fingerprint,
+            approval=NodeApproval.pending,
+            role=NodeRole.slave,
+        )
+        session.add(node)
+        logger.warning("Node %r announced itself from %s", node.name, source_ip)
+    elif node.approval == NodeApproval.rejected:
+        # A rejected node that comes back gets a fresh look rather than being
+        # silently ignored; an operator may have rejected it by mistake.
+        node.approval = NodeApproval.pending
+
+    node.hostname = hostname or node.hostname
+    node.announce_ip = source_ip or node.announce_ip
+    node.wan_iface = wan_iface or node.wan_iface
+    node.agent_version = agent_version or node.agent_version
+    node.announce_csr_pem = csr_pem
+    # The node is authoritative about its own LANs, so a corrected subnet
+    # propagates. An empty announce never wipes a good set.
+    if subnets:
+        node.subnets = subnets
+    if not node.address:
+        node.address = source_ip or ""
+
+    token = secrets.token_urlsafe(32)
+    node.announce_token_hash = hash_token(token)
+    return node, token, fingerprint
+
+
+async def next_transit_host(session: AsyncSession) -> int:
+    """Lowest free host number in the transit subnet.
+
+    .1 belongs to the hub itself, so nodes start at .2.
+    """
+    used = set(await session.scalars(select(Node.transit_host).where(Node.transit_host.is_not(None))))
+    for host in range(2, 250):
+        if host not in used:
+            return host
+    raise AgentError("no free address left in the transit subnet")
+
+
+async def approve(session: AsyncSession, node: Node, approver_id) -> Node:
+    """Accept a node: give it a transit address and sign the key it announced."""
+    if node.announce_csr_pem is None:
+        raise AgentError("this node never announced a key, nothing to sign")
+
+    if node.transit_host is None and not node.is_hub:
+        node.transit_host = await next_transit_host(session)
+
+    ca = await pki.require_ca(session)
+    cert = pki.sign_agent_csr(ca, node.announce_csr_pem, node.name)
+    node.agent_cert_pem = pki.cert_to_pem(cert)
+    node.agent_cert_serial = f"{cert.serial_number:x}"
+    node.agent_cert_not_after = cert.not_valid_after_utc
+
+    node.approval = NodeApproval.approved
+    node.approved_at = datetime.now(UTC)
+    node.approved_by_id = approver_id
+    logger.warning("Node %r approved", node.name)
+    return node
+
+
+async def reject(session: AsyncSession, node: Node) -> Node:
+    """Refuse a node. Its papers are dropped, so an accept later re-signs them."""
+    node.approval = NodeApproval.rejected
+    node.agent_cert_pem = None
+    node.agent_cert_serial = None
+    node.agent_cert_not_after = None
+    logger.warning("Node %r rejected", node.name)
+    return node
+
+
+async def collect_decision(
+    session: AsyncSession, token: str
+) -> tuple[Node, str | None, str | None]:
+    """What the agent gets when it polls: its state, and its papers once accepted."""
+    node = await session.scalar(
+        select(Node).where(Node.announce_token_hash == hash_token(token))
+    )
+    if node is None:
+        raise AgentError("unknown announcement")
+    if node.approval != NodeApproval.approved or node.agent_cert_pem is None:
+        return node, None, None
+
+    ca = await pki.require_ca(session)
+    return node, node.agent_cert_pem, ca.cert_pem
 
 
 async def enroll(
@@ -73,6 +239,10 @@ async def get_node_by_name(session: AsyncSession, name: str) -> Node:
     node = await session.scalar(select(Node).where(Node.name == name))
     if node is None:
         raise AgentError(f"unknown node {name!r}")
+    # A certificate alone is not membership: a node an operator rejected must
+    # stop receiving configuration even while its certificate is still valid.
+    if node.approval != NodeApproval.approved:
+        raise AgentError(f"node {name!r} is not approved")
     if not node.is_enabled:
         raise AgentError(f"node {name!r} is disabled")
     return node
@@ -88,6 +258,7 @@ async def build_config(session: AsyncSession, node: Node) -> dict:
 
     ccd = await _build_ccd(session, node, proto="udp")
     ccd_tcp = await _build_ccd(session, node, proto="tcp") if node.tcp_port else {}
+    transit_conf, ccd_transit = await _build_transit(session, node)
 
     payload = {
         "server_conf": openvpn.render_server_config(node),
@@ -103,19 +274,58 @@ async def build_config(session: AsyncSession, node: Node) -> dict:
         "crl_pem": crl_pem,
         "ccd": ccd,
         "ccd_tcp": ccd_tcp,
+        "transit_conf": transit_conf,
+        "ccd_transit": ccd_transit,
+        "is_hub": node.is_hub,
     }
 
     # The CRL carries a timestamp, so hashing it would change the revision on
     # every poll. Hash the parts that describe intent instead.
     digest = hashlib.sha256()
-    for key in ("server_conf", "server_conf_tcp", "ca_pem", "server_cert_pem", "tls_crypt_key"):
+    for key in (
+        "server_conf",
+        "server_conf_tcp",
+        "ca_pem",
+        "server_cert_pem",
+        "tls_crypt_key",
+        "transit_conf",
+    ):
         digest.update(payload[key].encode())
-    for entries in (ccd, ccd_tcp):
+    for entries in (ccd, ccd_tcp, ccd_transit):
         for name in sorted(entries):
             digest.update(name.encode())
             digest.update(entries[name].encode())
     payload["revision"] = digest.hexdigest()[:32]
     return payload
+
+
+async def _build_transit(
+    session: AsyncSession, node: Node
+) -> tuple[str, dict[str, str]]:
+    """The transit tunnel, from this node's point of view.
+
+    The hub runs the listener and one ccd entry per node; every other node runs
+    a client that dials it. Nodes therefore need no inbound port at all, which
+    is the same reason the agent dials the panel rather than the reverse.
+    """
+    if node.is_hub:
+        nodes = list(
+            await session.scalars(
+                select(Node).where(
+                    Node.is_hub.is_(False),
+                    Node.approval == NodeApproval.approved,
+                    Node.is_enabled.is_(True),
+                )
+            )
+        )
+        entries = {n.name: openvpn.render_transit_ccd(n) for n in nodes}
+        return openvpn.render_transit_server_config(nodes), entries
+
+    hub = await session.scalar(select(Node).where(Node.is_hub.is_(True)))
+    if hub is None or not hub.address:
+        # Nothing to dial yet; the node keeps serving whatever it already has.
+        return "", {}
+    return openvpn.render_transit_client_config(node, hub.address), {}
 
 
 async def _build_ccd(session: AsyncSession, node: Node, *, proto: str) -> dict[str, str]:

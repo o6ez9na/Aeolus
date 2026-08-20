@@ -40,6 +40,7 @@ mkdir -p /run/openvpn
 
 openvpn_pid=""
 openvpn_tcp_pid=""
+openvpn_transit_pid=""
 
 start_openvpn() {
     echo "starting openvpn on $UPLINK, NAT for $VPN_SUBNET/$VPN_MASK"
@@ -54,13 +55,24 @@ start_openvpn() {
         openvpn --config "$CONFIG_DIR/server-tcp.conf" --cd "$CONFIG_DIR" &
         openvpn_tcp_pid=$!
     fi
+
+    # Transit: the hub listens for nodes here, a node dials the hub. Same file
+    # name either way — the panel decides which of the two it wrote.
+    openvpn_transit_pid=""
+    if [ -f "$CONFIG_DIR/transit.conf" ]; then
+        echo "starting openvpn transit tunnel"
+        openvpn --config "$CONFIG_DIR/transit.conf" --cd "$CONFIG_DIR" &
+        openvpn_transit_pid=$!
+    fi
 }
 
 stop_openvpn() {
     [ -n "$openvpn_pid" ] && kill "$openvpn_pid" 2>/dev/null || true
     [ -n "$openvpn_tcp_pid" ] && kill "$openvpn_tcp_pid" 2>/dev/null || true
+    [ -n "$openvpn_transit_pid" ] && kill "$openvpn_transit_pid" 2>/dev/null || true
     wait "$openvpn_pid" 2>/dev/null || true
     wait "$openvpn_tcp_pid" 2>/dev/null || true
+    wait "$openvpn_transit_pid" 2>/dev/null || true
 }
 
 shutdown() {
@@ -79,7 +91,8 @@ while true; do
 
     # OpenVPN writes status.log mode 0600; the agent runs as another user and
     # only ever reads it. Re-apply on every pass because the file is recreated.
-    chmod 0644 /run/openvpn/status.log /run/openvpn/status-tcp.log 2>/dev/null || true
+    chmod 0644 /run/openvpn/status.log /run/openvpn/status-tcp.log \
+        /run/openvpn/status-transit.log 2>/dev/null || true
 
     if ! kill -0 "$openvpn_pid" 2>/dev/null; then
         echo "openvpn exited, restarting" >&2
@@ -90,6 +103,13 @@ while true; do
 
     if [ -n "$openvpn_tcp_pid" ] && ! kill -0 "$openvpn_tcp_pid" 2>/dev/null; then
         echo "openvpn tcp listener exited, restarting" >&2
+        stop_openvpn
+        start_openvpn
+        continue
+    fi
+
+    if [ -n "$openvpn_transit_pid" ] && ! kill -0 "$openvpn_transit_pid" 2>/dev/null; then
+        echo "openvpn transit tunnel exited, restarting" >&2
         stop_openvpn
         start_openvpn
         continue

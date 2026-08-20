@@ -7,6 +7,12 @@ services:
     # Caddy is the only thing that should be reachable from outside.
     ports: !reset []
 
+  backend:
+    # Remote agents dial the panel over gRPC with a client certificate, so this
+    # is the one API port that has to be reachable from outside.
+    ports:
+      - "${AEOLUS_GRPC_PORT:-50051}:50051"
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped

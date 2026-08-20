@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, OperatorUser, SessionDep
-from app.models.node import Client, ClientStatus, Node, NodeStatus
+from app.models.node import Client, ClientStatus, Node, NodeApproval, NodeStatus
 from app.schemas.node import (
     EnrollmentToken,
     NodeCreate,
@@ -13,7 +13,7 @@ from app.schemas.node import (
     NodeSummary,
     NodeUpdate,
 )
-from app.services import agent, audit
+from app.services import agent, audit, pki
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 
@@ -32,6 +32,7 @@ async def node_summary(session: SessionDep, _: CurrentUser) -> NodeSummary:
                 func.count(Node.id),
                 func.count(Node.id).filter(Node.status == NodeStatus.online),
                 func.count(Node.id).filter(Node.status == NodeStatus.error),
+                func.count(Node.id).filter(Node.approval == NodeApproval.pending),
                 func.coalesce(func.sum(Node.sessions), 0),
                 func.coalesce(func.sum(Node.rx_bytes), 0),
                 func.coalesce(func.sum(Node.tx_bytes), 0),
@@ -52,9 +53,10 @@ async def node_summary(session: SessionDep, _: CurrentUser) -> NodeSummary:
         nodes_total=node_row[0],
         nodes_online=node_row[1],
         failed_nodes=node_row[2],
-        sessions=node_row[3],
-        rx_bytes=node_row[4],
-        tx_bytes=node_row[5],
+        nodes_pending=node_row[3],
+        sessions=node_row[4],
+        rx_bytes=node_row[5],
+        tx_bytes=node_row[6],
         clients_total=client_row[0],
         clients_active=client_row[1],
     )
@@ -172,3 +174,66 @@ async def delete_node(
     )
     await session.delete(node)
     await session.commit()
+
+
+@router.post("/{node_id}/approve", response_model=NodeRead)
+async def approve_node(
+    node_id: uuid.UUID, request: Request, session: SessionDep, user: OperatorUser
+) -> Node:
+    """Accept a node into the mesh: sign its key and give it a transit address.
+
+    The operator is expected to have compared the fingerprint shown here with
+    the one the agent printed on the node itself. Nothing else authenticates the
+    request, which is why it stays inert until this call.
+    """
+    node = await _get_node(session, node_id)
+    try:
+        await agent.approve(session, node, user.id)
+    except (agent.AgentError, pki.PkiError) as exc:
+        await session.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
+
+    await audit.record(
+        session,
+        "node.approve",
+        actor=user,
+        request=request,
+        target_type="node",
+        target_id=node.id,
+        target_label=node.name,
+        detail={
+            "fingerprint": node.key_fingerprint,
+            "transit_host": node.transit_host,
+            "subnets": node.subnets or [],
+        },
+    )
+    await session.commit()
+    await session.refresh(node)
+    return node
+
+
+@router.post("/{node_id}/reject", response_model=NodeRead)
+async def reject_node(
+    node_id: uuid.UUID, request: Request, session: SessionDep, user: OperatorUser
+) -> Node:
+    """Refuse a node. Its agent keeps asking, so this is not permanent."""
+    node = await _get_node(session, node_id)
+    if node.is_hub:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "the panel's own node cannot be rejected"
+        )
+
+    await agent.reject(session, node)
+    await audit.record(
+        session,
+        "node.reject",
+        actor=user,
+        request=request,
+        target_type="node",
+        target_id=node.id,
+        target_label=node.name,
+        detail={"fingerprint": node.key_fingerprint},
+    )
+    await session.commit()
+    await session.refresh(node)
+    return node

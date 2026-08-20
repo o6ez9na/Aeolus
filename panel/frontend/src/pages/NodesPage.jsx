@@ -13,6 +13,12 @@ function NodeSubline({ node }) {
   if (!node.is_enabled) return <div className="sub">выключен вручную</div>
   if (node.status_message) return <div className="sub err">{node.status_message}</div>
 
+  // The agent reporting in says nothing about the tunnel clients actually
+  // travel through, and a node whose transit is down routes nobody.
+  if (!node.transit_connected) {
+    return <div className="sub err">туннель до панели не установлен</div>
+  }
+
   const days = daysUntil(node.server_cert_not_after)
   if (days !== null && days <= 14) {
     return (
@@ -67,7 +73,15 @@ function NodeRow({ node, canEdit, onToggle, onDelete }) {
 
   return (
     <div className="row">
-      <span className={`dot ${node.is_enabled ? node.status : 'disabled'}`} />
+      <span
+        className={`dot ${
+          !node.is_enabled
+            ? 'disabled'
+            : node.transit_connected
+              ? node.status
+              : 'error'
+        }`}
+      />
       <span>
         <span className={`name ${node.status === 'online' ? '' : 'faded'}`}>{node.name}</span>
         <NodeSubline node={node} />

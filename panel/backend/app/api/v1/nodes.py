@@ -13,15 +13,22 @@ from app.schemas.node import (
     NodeSummary,
     NodeUpdate,
 )
-from app.services import agent, audit, pki
+from app.services import agent, audit, openvpn, pki
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 
 
 @router.get("", response_model=list[NodeRead])
-async def list_nodes(session: SessionDep, _: CurrentUser) -> list[Node]:
+async def list_nodes(session: SessionDep, _: CurrentUser) -> list[NodeRead]:
     result = await session.scalars(select(Node).order_by(Node.name))
-    return list(result)
+    connected = openvpn.transit_sessions()
+    nodes = []
+    for node in result:
+        data = NodeRead.model_validate(node)
+        # The hub is not its own transit peer; it is always reachable to itself.
+        data.transit_connected = node.is_hub or node.name in connected
+        nodes.append(data)
+    return nodes
 
 
 @router.get("/summary", response_model=NodeSummary)

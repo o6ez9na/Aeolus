@@ -66,6 +66,9 @@ class NodeRead(NodeBase):
     subnets: list[str] = []
     key_fingerprint: str | None = None
     transit_host: int | None = None
+    # Whether the hub currently holds a tunnel with this node, as opposed to
+    # whether its agent is answering.
+    transit_connected: bool = False
 
     @field_validator("subnets", mode="before")
     @classmethod

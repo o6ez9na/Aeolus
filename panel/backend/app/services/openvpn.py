@@ -307,6 +307,37 @@ async def sync_local_crl(session) -> bool:
     return True
 
 
+def transit_sessions() -> set[str]:
+    """Node names the hub currently holds a transit tunnel with.
+
+    The agent reports its own health, which is why a node whose tunnel had
+    collapsed still showed up green: the agent was fine, the tunnel was not.
+    The hub knows better — a node either has a session here or it does not.
+    """
+    path = Path("/run/openvpn/status-transit.log")
+    if not path.exists():
+        return set()
+
+    names: set[str] = set()
+    section = ""
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return set()
+
+    for line in lines:
+        if line.startswith("OpenVPN CLIENT LIST"):
+            section = "clients"
+            continue
+        if line.startswith("ROUTING TABLE") or line.startswith("GLOBAL STATS"):
+            section = ""
+            continue
+        parts = line.split(",")
+        if section == "clients" and len(parts) >= 5 and parts[0] != "Common Name":
+            names.add(parts[0])
+    return names
+
+
 async def sync_routing_plan(session) -> bool:
     """Write the routing plan the local supervisor applies.
 

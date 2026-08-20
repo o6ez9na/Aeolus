@@ -54,7 +54,7 @@ function ClientRow({ client, nodesById, canEdit, expanded, onExpand, onToggle, o
               {client.status === 'active' ? 'выкл' : 'вкл'}
             </button>
             <ConfirmButton
-              title={`Удалить клиента ${client.common_name}`}
+              title={`Удалить клиента ${client.common_name} и отозвать его сертификат`}
               onConfirm={() => onDelete(client)}
             />
           </>
@@ -77,6 +77,7 @@ export function ClientsPage() {
   const [busy, setBusy] = useState(false)
   const [expandedId, setExpandedId] = useState(null)
   const [draftAccess, setDraftAccess] = useState([])
+  const [actionError, setActionError] = useState(null)
 
   const canEdit = user?.role === 'admin' || user?.role === 'operator'
   const nodeList = nodes.data ?? []
@@ -127,7 +128,16 @@ export function ClientsPage() {
   }
 
   async function handleDelete(client) {
-    await api.delete(`/clients/${client.id}`)
+    setActionError(null)
+    try {
+      // The backend revokes the certificate first and refuses to delete if it
+      // cannot, so a failure here means the client is still there on purpose.
+      await api.delete(`/clients/${client.id}`)
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : `Не удалось удалить ${client.common_name}`,
+      )
+    }
     await refreshAll()
   }
 
@@ -148,6 +158,8 @@ export function ClientsPage() {
         <span className="dim">был</span>
         <span />
       </div>
+
+      {actionError && <div className="empty form-error">{actionError}</div>}
 
       {clients.data.length === 0 && (
         <div className="empty">

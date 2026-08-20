@@ -1,3 +1,4 @@
+from app.models.audit import AuditEvent
 from app.models.base import Base
 from app.models.node import (
     Client,
@@ -7,10 +8,11 @@ from app.models.node import (
     NodeRole,
     NodeStatus,
 )
-from app.models.pki import CertificateAuthority
+from app.models.pki import CertificateAuthority, RevokedCertificate
 from app.models.user import RefreshToken, User, UserRole
 
 __all__ = [
+    "AuditEvent",
     "Base",
     "CertificateAuthority",
     "Client",
@@ -20,6 +22,7 @@ __all__ = [
     "NodeRole",
     "NodeStatus",
     "RefreshToken",
+    "RevokedCertificate",
     "User",
     "UserRole",
 ]

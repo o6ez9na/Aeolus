@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.crypto import decrypt_secret, encrypt_secret
 from app.models.node import Client, ClientStatus, Node
-from app.models.pki import CertificateAuthority
+from app.models.pki import CertificateAuthority, RevokedCertificate
 
 CURVE = ec.SECP256R1()
 
@@ -349,17 +349,58 @@ async def issue_server_cert(session: AsyncSession, node: Node) -> Node:
 # --------------------------------------------------------------------------- #
 
 
-async def revoke_client(session: AsyncSession, client: Client) -> Client:
+async def revoke_certificate(
+    session: AsyncSession,
+    serial: str,
+    common_name: str,
+    *,
+    reason: str | None = None,
+    revoked_at: datetime | None = None,
+) -> RevokedCertificate:
+    """Record a serial in the revocation log, once.
+
+    Idempotent: revoking twice keeps the first timestamp, because that is the
+    moment the certificate actually stopped being trusted.
+    """
+    existing = await session.scalar(
+        select(RevokedCertificate).where(RevokedCertificate.serial == serial)
+    )
+    if existing is not None:
+        return existing
+
+    entry = RevokedCertificate(
+        serial=serial,
+        common_name=common_name,
+        revoked_at=revoked_at or datetime.now(UTC),
+        reason=reason,
+    )
+    session.add(entry)
+    # The CRL is built from this table in the same transaction, so the row has
+    # to be visible before build_crl runs its query.
+    await session.flush()
+    return entry
+
+
+async def revoke_client(
+    session: AsyncSession, client: Client, *, reason: str | None = None
+) -> Client:
     if client.cert_serial is None:
         raise PkiError("Client has no certificate to revoke")
     if client.revoked_at is None:
         client.revoked_at = datetime.now(UTC)
     client.status = ClientStatus.revoked
+    await revoke_certificate(
+        session,
+        client.cert_serial,
+        client.common_name,
+        reason=reason,
+        revoked_at=client.revoked_at,
+    )
     return client
 
 
 async def build_crl(session: AsyncSession) -> str:
-    """Rebuild the CRL from every revoked client.
+    """Rebuild the CRL from the revocation log.
 
     Nodes only stop honouring a certificate once they have this file, so a revoke
     is not complete until the CRL reaches them.
@@ -377,16 +418,12 @@ async def build_crl(session: AsyncSession) -> str:
         .add_extension(x509.CRLNumber(ca.crl_number), critical=False)
     )
 
-    revoked = await session.scalars(
-        select(Client).where(
-            Client.revoked_at.is_not(None), Client.cert_serial.is_not(None)
-        )
-    )
-    for client in revoked:
+    revoked = await session.scalars(select(RevokedCertificate))
+    for entry in revoked:
         builder = builder.add_revoked_certificate(
             x509.RevokedCertificateBuilder()
-            .serial_number(int(client.cert_serial, 16))
-            .revocation_date(client.revoked_at)
+            .serial_number(int(entry.serial, 16))
+            .revocation_date(entry.revoked_at)
             .build()
         )
 

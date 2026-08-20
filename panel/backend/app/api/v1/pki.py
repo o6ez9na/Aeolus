@@ -1,16 +1,17 @@
 import uuid
 
 from cryptography import x509
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import func, select
 
 from app.api.deps import AdminUser, CurrentUser, OperatorUser, SessionDep
 from app.core.crypto import SecretUnreadableError
 from app.models.node import Client, Node
+from app.models.pki import RevokedCertificate
 from app.schemas.node import ClientRead, NodeRead
 from app.schemas.pki import CaInit, CaStatus
-from app.services import openvpn, pki
+from app.services import audit, openvpn, pki
 
 router = APIRouter(prefix="/pki", tags=["pki"])
 
@@ -28,9 +29,9 @@ async def ca_status(session: SessionDep, _: CurrentUser) -> CaStatus:
         return CaStatus(initialised=False)
 
     cert = x509.load_pem_x509_certificate(ca.cert_pem.encode())
-    revoked = await session.scalar(
-        select(func.count(Client.id)).where(Client.revoked_at.is_not(None))
-    )
+    # Counted from the revocation log, not from the clients: certificates of
+    # deleted clients are still on the CRL and still take up a line in it.
+    revoked = await session.scalar(select(func.count(RevokedCertificate.id)))
     clients_with_cert = await session.scalar(
         select(func.count(Client.id)).where(Client.cert_serial.is_not(None))
     )
@@ -53,13 +54,23 @@ async def ca_status(session: SessionDep, _: CurrentUser) -> CaStatus:
 
 
 @router.post("/init", response_model=CaStatus, status_code=status.HTTP_201_CREATED)
-async def init_ca(body: CaInit, session: SessionDep, _: AdminUser) -> CaStatus:
+async def init_ca(
+    body: CaInit, request: Request, session: SessionDep, user: AdminUser
+) -> CaStatus:
     try:
         await pki.init_ca(session, body.common_name)
     except pki.PkiError as exc:
         raise _pki_error(exc) from None
+    await audit.record(
+        session,
+        "pki.init_ca",
+        actor=user,
+        request=request,
+        target_type="ca",
+        target_label=body.common_name,
+    )
     await session.commit()
-    return await ca_status(session, _)
+    return await ca_status(session, user)
 
 
 @router.get("/bootstrap-ca.crt", response_class=PlainTextResponse)
@@ -97,7 +108,7 @@ async def download_crl(session: SessionDep, _: CurrentUser) -> str:
 
 @router.post("/clients/{client_id}/certificate", response_model=ClientRead)
 async def issue_client_certificate(
-    client_id: uuid.UUID, session: SessionDep, _: OperatorUser
+    client_id: uuid.UUID, request: Request, session: SessionDep, user: OperatorUser
 ) -> ClientRead:
     client = await session.get(Client, client_id)
     if client is None:
@@ -108,6 +119,16 @@ async def issue_client_certificate(
     except (pki.PkiError, SecretUnreadableError) as exc:
         raise _pki_error(exc) from None
 
+    await audit.record(
+        session,
+        "pki.issue_client_cert",
+        actor=user,
+        request=request,
+        target_type="client",
+        target_id=client.id,
+        target_label=client.common_name,
+        detail={"serial": client.cert_serial, "not_after": client.cert_not_after},
+    )
     await session.commit()
     await session.refresh(client, ["grants"])
     data = ClientRead.model_validate(client)
@@ -117,7 +138,7 @@ async def issue_client_certificate(
 
 @router.post("/clients/{client_id}/revoke", response_model=ClientRead)
 async def revoke_client_certificate(
-    client_id: uuid.UUID, session: SessionDep, _: OperatorUser
+    client_id: uuid.UUID, request: Request, session: SessionDep, user: OperatorUser
 ) -> ClientRead:
     client = await session.get(Client, client_id)
     if client is None:
@@ -131,6 +152,16 @@ async def revoke_client_certificate(
     except (pki.PkiError, SecretUnreadableError) as exc:
         raise _pki_error(exc) from None
 
+    await audit.record(
+        session,
+        "pki.revoke_client_cert",
+        actor=user,
+        request=request,
+        target_type="client",
+        target_id=client.id,
+        target_label=client.common_name,
+        detail={"serial": client.cert_serial},
+    )
     await session.commit()
     await session.refresh(client, ["grants"])
     data = ClientRead.model_validate(client)
@@ -140,7 +171,7 @@ async def revoke_client_certificate(
 
 @router.post("/nodes/{node_id}/certificate", response_model=NodeRead)
 async def issue_server_certificate(
-    node_id: uuid.UUID, session: SessionDep, _: OperatorUser
+    node_id: uuid.UUID, request: Request, session: SessionDep, user: OperatorUser
 ) -> Node:
     node = await session.get(Node, node_id)
     if node is None:
@@ -151,6 +182,16 @@ async def issue_server_certificate(
     except (pki.PkiError, SecretUnreadableError) as exc:
         raise _pki_error(exc) from None
 
+    await audit.record(
+        session,
+        "pki.issue_server_cert",
+        actor=user,
+        request=request,
+        target_type="node",
+        target_id=node.id,
+        target_label=node.name,
+        detail={"serial": node.server_cert_serial, "not_after": node.server_cert_not_after},
+    )
     await session.commit()
     await session.refresh(node)
     return node

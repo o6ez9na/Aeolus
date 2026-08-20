@@ -1,4 +1,6 @@
-from sqlalchemy import BigInteger, Boolean, String, Text
+from datetime import datetime
+
+from sqlalchemy import BigInteger, Boolean, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
@@ -30,3 +32,23 @@ class CertificateAuthority(Base, UUIDMixin, TimestampMixin):
     crl_number: Mapped[int] = mapped_column(BigInteger, default=1)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class RevokedCertificate(Base, UUIDMixin, TimestampMixin):
+    """One entry of the CRL, kept independently of whatever it was issued to.
+
+    The CRL used to be rebuilt from the client rows, so deleting a client
+    silently un-revoked its certificate: the row was gone, the serial dropped
+    out of the list, and the profile kept working until it expired. A revocation
+    has to outlive the object it was issued for, so it lives here instead.
+    """
+
+    __tablename__ = "revoked_certificates"
+
+    # Hex, lower case, matching Client.cert_serial.
+    serial: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    common_name: Mapped[str] = mapped_column(String(64))
+    revoked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    # Free-form note for the operator, e.g. "client deleted".
+    reason: Mapped[str | None] = mapped_column(String(64))

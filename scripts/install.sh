@@ -176,25 +176,29 @@ t() { # t <key> [printf args]
 
 [ "$(id -u)" -eq 0 ] || { LANGUAGE="${LANGUAGE:-en}"; die "$(t need_root)"; }
 
+# Bash locals are visible to the functions a function calls, so every variable
+# here is prefixed: a local named the same as the caller's output variable would
+# shadow it, and `printf -v` would then fill this scope's copy while the caller
+# kept an unset variable — which under `set -u` aborts the install.
 ask() { # ask <prompt> <var> [default]
-  local prompt="$1" __var="$2" def="${3:-}" reply=""
+  local __ask_prompt="$1" __ask_var="$2" __ask_def="${3:-}" __ask_reply=""
   if [ -z "$HAVE_TTY" ]; then
-    printf -v "$__var" '%s' "$def"
+    printf -v "$__ask_var" '%s' "$__ask_def"
     return 0
   fi
-  [ -n "$def" ] && prompt="$prompt [$def]"
-  printf '%s: ' "$prompt" >/dev/tty
-  read -r reply </dev/tty || true
-  printf -v "$__var" '%s' "${reply:-$def}"
+  [ -n "$__ask_def" ] && __ask_prompt="$__ask_prompt [$__ask_def]"
+  printf '%s: ' "$__ask_prompt" >/dev/tty
+  read -r __ask_reply </dev/tty || true
+  printf -v "$__ask_var" '%s' "${__ask_reply:-$__ask_def}"
 }
 ask_secret() {
-  local prompt="$1" __var="$2" reply=""
+  local __ask_prompt="$1" __ask_var="$2" __ask_reply=""
   if [ -n "$HAVE_TTY" ]; then
-    printf '%s: ' "$prompt" >/dev/tty
-    read -rs reply </dev/tty || true
+    printf '%s: ' "$__ask_prompt" >/dev/tty
+    read -rs __ask_reply </dev/tty || true
     echo >/dev/tty
   fi
-  printf -v "$__var" '%s' "$reply"
+  printf -v "$__ask_var" '%s' "$__ask_reply"
 }
 
 choose_language() {
@@ -205,7 +209,7 @@ choose_language() {
   case "${LANG:-}${LC_ALL:-}" in *ru_RU*|*ru_*) LANGUAGE=ru ;; *) LANGUAGE=en ;; esac
   [ -n "$HAVE_TTY" ] || return 0
 
-  local reply
+  local reply=""
   say "$(t lang_question)"
   say "$(t lang_en)"
   say "$(t lang_ru)"
@@ -386,7 +390,7 @@ detect_lan_subnet() {
 # --- panel -----------------------------------------------------------------
 install_panel() {
   local env_file="$INSTALL_DIR/.env"
-  local domain admin_pass existing_pass
+  local domain="" admin_pass="" existing_pass=""
 
   domain="${AEOLUS_DOMAIN:-$(env_get "$env_file" AEOLUS_DOMAIN)}"
   if [ -z "$domain" ]; then
@@ -439,7 +443,7 @@ install_panel() {
 # --- node ------------------------------------------------------------------
 install_node() {
   local env_file="$INSTALL_DIR/.env"
-  local domain name subnets wan guess_subnet
+  local domain="" name="" subnets="" wan="" guess_subnet=""
 
   domain="${AEOLUS_PANEL_DOMAIN:-$(env_get "$env_file" AEOLUS_PANEL_DOMAIN)}"
   if [ -z "$domain" ]; then

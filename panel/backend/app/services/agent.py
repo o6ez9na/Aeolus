@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.crypto import decrypt_secret
 from app.models.node import Client, ClientStatus, Node, NodeStatus
+from app.services import ccd as ccd_service
 from app.services import openvpn, pki
 
 logger = logging.getLogger("aeolus.agent")
@@ -85,7 +86,8 @@ async def build_config(session: AsyncSession, node: Node) -> dict:
     ca = await pki.require_ca(session)
     crl_pem = await pki.build_crl(session)
 
-    ccd = await _build_ccd(session, node)
+    ccd = await _build_ccd(session, node, proto="udp")
+    ccd_tcp = await _build_ccd(session, node, proto="tcp") if node.tcp_port else {}
 
     payload = {
         "server_conf": openvpn.render_server_config(node),
@@ -100,6 +102,7 @@ async def build_config(session: AsyncSession, node: Node) -> dict:
         "tls_crypt_key": decrypt_secret(ca.tls_crypt_key_encrypted),
         "crl_pem": crl_pem,
         "ccd": ccd,
+        "ccd_tcp": ccd_tcp,
     }
 
     # The CRL carries a timestamp, so hashing it would change the revision on
@@ -107,18 +110,22 @@ async def build_config(session: AsyncSession, node: Node) -> dict:
     digest = hashlib.sha256()
     for key in ("server_conf", "server_conf_tcp", "ca_pem", "server_cert_pem", "tls_crypt_key"):
         digest.update(payload[key].encode())
-    for name in sorted(ccd):
-        digest.update(name.encode())
-        digest.update(ccd[name].encode())
+    for entries in (ccd, ccd_tcp):
+        for name in sorted(entries):
+            digest.update(name.encode())
+            digest.update(entries[name].encode())
     payload["revision"] = digest.hexdigest()[:32]
     return payload
 
 
-async def _build_ccd(session: AsyncSession, node: Node) -> dict[str, str]:
+async def _build_ccd(session: AsyncSession, node: Node, *, proto: str) -> dict[str, str]:
     """One client-config-dir entry per client, denying those without a grant.
 
     OpenVPN accepts any certificate the CA signed, so a client granted only
     node A would otherwise be able to use node B as well.
+
+    Built once per listener: the fixed addresses differ between the UDP and the
+    TCP subnet, so the two directories are not copies of each other.
     """
     clients = await session.scalars(
         select(Client).options(selectinload(Client.grants)).where(
@@ -126,14 +133,14 @@ async def _build_ccd(session: AsyncSession, node: Node) -> dict[str, str]:
         )
     )
 
-    ccd: dict[str, str] = {}
+    entries: dict[str, str] = {}
     for client in clients:
-        granted = node.id in {grant.node_id for grant in client.grants}
-        allowed = granted and client.status == ClientStatus.active
-        ccd[client.common_name] = (
-            f"# {client.common_name}\n" if allowed else "disable\n"
+        grant = next((g for g in client.grants if g.node_id == node.id), None)
+        allowed = grant is not None and client.status == ClientStatus.active
+        entries[client.common_name] = ccd_service.render(
+            grant, client.common_name, proto=proto, allowed=allowed
         )
-    return ccd
+    return entries
 
 
 async def record_status(session: AsyncSession, node: Node, report: dict) -> bool:

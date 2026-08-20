@@ -106,7 +106,14 @@ async def update_client(
 
     if node_ids is not None:
         await _validate_nodes(session, node_ids)
-        client.grants = [ClientNodeGrant(node_id=node_id) for node_id in node_ids]
+        # Keep the existing grant rows for nodes that stay: they carry the ccd
+        # settings, and rebuilding the list from scratch would silently drop a
+        # client's fixed address and routes.
+        existing = {grant.node_id: grant for grant in client.grants}
+        client.grants = [
+            existing.get(node_id) or ClientNodeGrant(node_id=node_id)
+            for node_id in node_ids
+        ]
 
     await audit.record(
         session,

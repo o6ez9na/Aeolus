@@ -33,8 +33,10 @@ message ConfigResponse {
   string server_key_pem = 6;
   string tls_crypt_key = 7;
   string crl_pem = 8;
-  // client-config-dir entries, keyed by common name.
+  // client-config-dir entries, keyed by common name. Two maps, because the two
+  // listeners hand out addresses from two different subnets.
   map<string, string> ccd = 9;
+  map<string, string> ccd_tcp = 11;
 }
 
 message Session {

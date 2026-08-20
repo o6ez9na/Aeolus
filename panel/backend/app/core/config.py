@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     # Not 443: the panel's own HTTPS already owns that port on the same host.
     master_tcp_port: int | None = 8443
     vpn_dns: str = "1.1.1.1"
+    # Fixed addresses are handed out below the dynamic pool, so a pinned client
+    # can never collide with one OpenVPN assigns on its own.
+    vpn_static_host_min: int = 2
+    vpn_static_host_max: int = 99
+    vpn_pool_host_min: int = 100
+    vpn_pool_host_max: int = 250
     # Conservative enough for mobile carriers, which commonly cap the path at
     # ~1400 bytes and drop anything larger instead of fragmenting.
     vpn_tun_mtu: int = 1360

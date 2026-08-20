@@ -285,6 +285,39 @@ select {
   color: var(--bar-empty);
 }
 
+/* ---------- ccd ---------- */
+
+.row.ccd {
+  grid-template-columns: minmax(160px, 1fr) minmax(120px, 0.7fr) 160px 100px 80px 120px;
+}
+
+.field textarea {
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.field textarea:focus {
+  border-color: var(--text-muted);
+}
+
+.ccd-preview {
+  flex-basis: 100%;
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-row);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
 /* ---------- audit ---------- */
 
 .row.audit {

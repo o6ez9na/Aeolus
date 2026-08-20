@@ -17,19 +17,6 @@ export function PlaceholderPage({ title, planned }) {
   )
 }
 
-export function CcdPage() {
-  return (
-    <PlaceholderPage
-      title="ccd"
-      planned={[
-        'client-config-dir на узел',
-        'фиксированные адреса и маршруты клиента',
-        'push-опции и iroute',
-      ]}
-    />
-  )
-}
-
 export function TrafficPage() {
   return (
     <PlaceholderPage

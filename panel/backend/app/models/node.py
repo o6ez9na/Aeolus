@@ -3,15 +3,18 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -135,10 +138,24 @@ class Client(Base, UUIDMixin, TimestampMixin):
 
 
 class ClientNodeGrant(Base, UUIDMixin, TimestampMixin):
-    """Which nodes a client is allowed to exit through."""
+    """Which nodes a client is allowed to exit through, and on what terms.
+
+    This row is also the client-config-dir entry for that pair: OpenVPN reads
+    one ccd file per common name per node, which is exactly this granularity.
+    """
 
     __tablename__ = "client_node_grants"
-    __table_args__ = (UniqueConstraint("client_id", "node_id", name="uq_client_node"),)
+    __table_args__ = (
+        UniqueConstraint("client_id", "node_id", name="uq_client_node"),
+        # Two clients cannot be pinned to the same tunnel address on one node.
+        Index(
+            "uq_node_static_host",
+            "node_id",
+            "static_host",
+            unique=True,
+            postgresql_where=text("static_host IS NOT NULL"),
+        ),
+    )
 
     client_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("clients.id", ondelete="CASCADE"), index=True
@@ -146,6 +163,22 @@ class ClientNodeGrant(Base, UUIDMixin, TimestampMixin):
     node_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("nodes.id", ondelete="CASCADE"), index=True
     )
+
+    # Host part of the fixed tunnel address, not the address itself: a node runs
+    # a UDP and a TCP listener on two different subnets, and the same client has
+    # to land on the same host number whichever one it reaches.
+    static_host: Mapped[int | None] = mapped_column(Integer)
+
+    # Networks pushed to this client, as CIDR strings.
+    push_routes: Mapped[list[str] | None] = mapped_column(JSON)
+
+    # Networks reachable *behind* this client, needed when it is a site gateway
+    # rather than a laptop.
+    iroutes: Mapped[list[str] | None] = mapped_column(JSON)
+
+    # Extra push directives, validated against an allow list before they land in
+    # a ccd file: a bad line there stops the client connecting at all.
+    push_options: Mapped[list[str] | None] = mapped_column(JSON)
 
     client: Mapped[Client] = relationship(back_populates="grants")
     node: Mapped[Node] = relationship(back_populates="grants")

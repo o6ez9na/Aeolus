@@ -59,6 +59,7 @@ class NodeAgentServicer(agent_pb2_grpc.NodeAgentServicer):
                 tls_crypt_key=payload["tls_crypt_key"],
                 crl_pem=payload["crl_pem"],
                 ccd=payload["ccd"],
+                ccd_tcp=payload["ccd_tcp"],
             )
 
     async def ReportStatus(self, request, context):

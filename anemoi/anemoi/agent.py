@@ -172,8 +172,6 @@ def make_channel(cfg: Config, enrolment: Enrolment) -> grpc.Channel:
 def apply_config(cfg: Config, response) -> bool:
     """Write the bundle. Returns True when OpenVPN needs a restart."""
     cfg.config_dir.mkdir(parents=True, exist_ok=True)
-    ccd_dir = cfg.config_dir / "ccd"
-    ccd_dir.mkdir(exist_ok=True)
 
     restart_needed = False
     for name, wanted in (
@@ -206,13 +204,19 @@ def apply_config(cfg: Config, response) -> bool:
         path.write_text(content)
         path.chmod(0o600 if name in {"server.key", "tls-crypt.key"} else 0o644)
 
-    # A stale ccd entry would keep granting access after the panel took it away.
-    wanted = set(response.ccd)
-    for existing in ccd_dir.iterdir():
-        if existing.is_file() and existing.name not in wanted:
-            existing.unlink()
-    for common_name, body in response.ccd.items():
-        (ccd_dir / common_name).write_text(body)
+    # One directory per listener: a pinned client has a different address on the
+    # UDP and the TCP subnet, so the entries are not interchangeable.
+    for dirname, entries in (("ccd", response.ccd), ("ccd-tcp", response.ccd_tcp)):
+        ccd_dir = cfg.config_dir / dirname
+        ccd_dir.mkdir(exist_ok=True)
+        # A stale ccd entry would keep granting access after the panel took it
+        # away.
+        wanted = set(entries)
+        for existing in ccd_dir.iterdir():
+            if existing.is_file() and existing.name not in wanted:
+                existing.unlink()
+        for common_name, body in entries.items():
+            (ccd_dir / common_name).write_text(body)
 
     (cfg.config_dir / ".revision").write_text(response.revision)
     return restart_needed

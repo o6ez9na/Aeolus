@@ -20,8 +20,9 @@ the local node exactly the way it talks to remote ones.
 
 ## Install with one command
 
-On a fresh Debian or Ubuntu box, as root. It asks whether this machine is the
-panel or a node, installs Docker if missing, and brings the stack up:
+On a fresh Debian or Ubuntu box, as root. It asks for a language, then whether
+this machine is the panel or a node, installs Docker if missing, checks that
+containers can actually reach the package mirrors, and brings the stack up:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/o6ez9na/Aeolus/main/scripts/install.sh | sudo bash
@@ -52,6 +53,32 @@ domain.
 Ports to leave open: panel `80`, `443`, `1194/udp`, `8443/tcp` (clients),
 `1195/udp` (nodes) and `50051/tcp` (agents); a node needs no inbound port at
 all beyond the VPN it serves.
+
+Set `AEOLUS_LANG=ru` (or `en`) to skip the language question.
+
+### If the build fails with "no such package"
+
+That is not a missing package on the host — it is the *build container* failing
+to fetch the Alpine index, so apk ends up with no index and reports every
+package as missing:
+
+```
+WARNING: fetching https://dl-cdn.alpinelinux.org/alpine/v3.22/main: temporary error
+ERROR: unable to select packages: openvpn (no such package)
+```
+
+Almost always docker has no usable DNS: the provider's resolver mangles the
+CDN, or the host has IPv6 that containers cannot use. The installer checks for
+this before building and offers to point docker at public resolvers; by hand it
+is:
+
+```sh
+echo '{ "dns": ["1.1.1.1", "8.8.8.8"] }' > /etc/docker/daemon.json
+systemctl restart docker
+```
+
+The image build also retries and falls back to other mirrors on its own, since
+these failures are often just a bad minute at the CDN.
 
 ## Run it by hand
 

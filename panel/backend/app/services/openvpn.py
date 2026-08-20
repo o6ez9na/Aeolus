@@ -136,6 +136,11 @@ dev tun
 topology subnet
 
 server {settings.vpn_transit_subnet} {settings.vpn_netmask}
+# Nodes need a way back to the client pools: a client's packet reaches a node
+# with its own address as the source, and the reply has to find the tunnel it
+# came from rather than the node's default route.
+push "route {settings.vpn_subnet} {settings.vpn_netmask}"
+push "route {settings.vpn_tcp_subnet} {settings.vpn_netmask}"
 client-config-dir ccd-transit
 # Only nodes the panel knows about, by name.
 ccd-exclusive

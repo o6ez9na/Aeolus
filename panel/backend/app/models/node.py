@@ -89,6 +89,13 @@ class Node(Base, UUIDMixin, TimestampMixin):
     # Host part of this node's address inside the transit subnet.
     transit_host: Mapped[int | None] = mapped_column(Integer, unique=True)
 
+    # Carry the transit tunnel inside a WebSocket over the panel's HTTPS. Some
+    # networks let an OpenVPN handshake through and then kill the flow whatever
+    # port or protocol it uses; inside a real TLS session on 443 there is
+    # nothing left for them to recognise. Costs a little throughput, so it is
+    # per node rather than the default.
+    transit_obfuscated: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Handed to the agent when it announces, so it can poll for the decision
     # without holding any other credential yet. Stored hashed.
     announce_token_hash: Mapped[str | None] = mapped_column(String(64), index=True)

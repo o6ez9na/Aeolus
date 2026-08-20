@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     # hatch clients already have.
     vpn_transit_proto: str = "udp"
 
+    # Name of the wstunnel container a node runs beside OpenVPN, as its own
+    # compose network resolves it.
+    transit_wstunnel_host: str = "wstunnel"
+
     vpn_dns: str = "1.1.1.1"
     # Fixed addresses are handed out below the dynamic pool, so a pinned client
     # can never collide with one OpenVPN assigns on its own.

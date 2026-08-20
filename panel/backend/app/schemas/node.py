@@ -34,6 +34,7 @@ class NodeUpdate(BaseModel):
     max_clients: int | None = Field(default=None, ge=1)
     bandwidth_capacity_mbps: int | None = Field(default=None, ge=1)
     is_enabled: bool | None = None
+    transit_obfuscated: bool | None = None
 
 
 class NodeRead(NodeBase):
@@ -69,6 +70,7 @@ class NodeRead(NodeBase):
     # Whether the hub currently holds a tunnel with this node, as opposed to
     # whether its agent is answering.
     transit_connected: bool = False
+    transit_obfuscated: bool = False
 
     @field_validator("subnets", mode="before")
     @classmethod

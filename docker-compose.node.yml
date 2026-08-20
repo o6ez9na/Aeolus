@@ -27,6 +27,20 @@ services:
       - openvpn-config:/etc/openvpn/aeolus
       - openvpn-run:/run/openvpn
 
+  # Carries the transit tunnel inside a WebSocket to the panel's HTTPS, for
+  # networks that kill an OpenVPN flow whatever port it uses. Idle unless the
+  # panel marks this node as obfuscated — the tunnel simply does not dial it.
+  wstunnel:
+    image: ghcr.io/erebe/wstunnel:v10.1.10
+    restart: unless-stopped
+    command:
+      - /home/app/wstunnel
+      - client
+      - -L
+      - tcp://0.0.0.0:${AEOLUS_VPN_TRANSIT_PORT:-1195}:openvpn:${AEOLUS_VPN_TRANSIT_PORT:-1195}
+      - --http-upgrade-path-prefix=${AEOLUS_TRANSIT_PATH:-transit}
+      - wss://${AEOLUS_PANEL_DOMAIN}
+
   anemoi:
     build:
       context: .

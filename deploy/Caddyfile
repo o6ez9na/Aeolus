@@ -10,5 +10,12 @@
 		Referrer-Policy no-referrer
 	}
 
+	# The transit tunnel, disguised as an ordinary WebSocket on the panel's own
+	# certificate. Some networks pass an OpenVPN handshake and then kill the flow
+	# whatever port or protocol it uses; inside a real TLS session on 443 there
+	# is nothing left to recognise.
+	@transit path /transit /transit/*
+	reverse_proxy @transit wstunnel:8080
+
 	reverse_proxy frontend:80
 }

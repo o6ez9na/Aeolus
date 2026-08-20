@@ -191,6 +191,38 @@ verb 3
 
 def render_transit_client_config(node: Node, hub_address: str) -> str:
     """What a node runs to reach the hub. The node is a client here."""
+    if node.transit_obfuscated:
+        # The tunnel goes to the local wstunnel container, which carries it to
+        # the panel inside an ordinary WebSocket on 443.
+        return f"""# Aeolus transit · node {node.name} (через WebSocket)
+client
+dev tun
+proto tcp-client
+remote {settings.transit_wstunnel_host} {settings.vpn_transit_port} tcp
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+remote-cert-tls server
+
+ca ca.crt
+cert transit.crt
+key transit.key
+tls-crypt tls-crypt.key
+
+data-ciphers AES-256-GCM
+data-ciphers-fallback AES-256-GCM
+auth SHA256
+tls-version-min 1.2
+
+tun-mtu {settings.vpn_tun_mtu}
+mssfix {settings.vpn_mssfix}
+keepalive 10 60
+
+status /run/openvpn/status-transit.log 5
+verb 3
+"""
+
     transit_proto = settings.vpn_transit_proto
     return f"""# Aeolus transit · node {node.name}
 client

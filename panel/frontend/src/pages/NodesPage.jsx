@@ -16,7 +16,12 @@ function NodeSubline({ node }) {
   // The agent reporting in says nothing about the tunnel clients actually
   // travel through, and a node whose transit is down routes nobody.
   if (!node.transit_connected) {
-    return <div className="sub err">туннель до панели не установлен</div>
+    return (
+      <div className="sub err">
+        туннель до панели не установлен
+        {!node.transit_obfuscated && ' — попробуй ws'}
+      </div>
+    )
   }
 
   const days = daysUntil(node.server_cert_not_after)
@@ -68,7 +73,7 @@ function PendingRow({ node, canEdit, busy, onApprove, onReject }) {
   )
 }
 
-function NodeRow({ node, canEdit, onToggle, onDelete }) {
+function NodeRow({ node, canEdit, onToggle, onDelete, onObfuscate }) {
   const bar = meter(node.bandwidth_mbps, node.bandwidth_capacity_mbps)
 
   return (
@@ -105,6 +110,19 @@ function NodeRow({ node, canEdit, onToggle, onDelete }) {
       <span className="right actions">
         {canEdit && (
           <>
+            {!node.is_hub && (
+              <button
+                className={`btn${node.transit_obfuscated ? '' : ' ghost'}`}
+                onClick={() => onObfuscate(node)}
+                title={
+                  node.transit_obfuscated
+                    ? 'Вернуть прямой транзит'
+                    : 'Вести транзит внутри WebSocket на 443 — для сетей, где режут VPN'
+                }
+              >
+                {node.transit_obfuscated ? 'ws вкл' : 'ws'}
+              </button>
+            )}
             <button className="btn" onClick={() => onToggle(node)}>
               {node.is_enabled ? 'выкл' : 'вкл'}
             </button>
@@ -170,6 +188,13 @@ export function NodesPage() {
 
   async function handleToggle(node) {
     await api.patch(`/nodes/${node.id}`, { is_enabled: !node.is_enabled })
+    await refreshAll()
+  }
+
+  async function handleObfuscate(node) {
+    await api.patch(`/nodes/${node.id}`, {
+      transit_obfuscated: !node.transit_obfuscated,
+    })
     await refreshAll()
   }
 
@@ -242,6 +267,7 @@ export function NodesPage() {
           canEdit={canEdit}
           onToggle={handleToggle}
           onDelete={handleDelete}
+          onObfuscate={handleObfuscate}
         />
       ))}
 

@@ -84,6 +84,25 @@ services:
       # status.log lives here; the agent reads it to report sessions.
       - openvpn-run:/run/openvpn
 
+  # Wraps the transit tunnel in a WebSocket so it can travel inside the panel's
+  # HTTPS. Reachable only through Caddy, and only able to reach the one port it
+  # is meant to forward to.
+  wstunnel:
+    image: ghcr.io/erebe/wstunnel:v10.1.10
+    restart: unless-stopped
+    depends_on:
+      - openvpn
+    command:
+      # dumb-init is the entrypoint and the binary lives in the app's home, so
+      # the full path is part of the command.
+      - /home/app/wstunnel
+      - server
+      - ws://0.0.0.0:8080
+      - --restrict-http-upgrade-path-prefix=${AEOLUS_TRANSIT_PATH:-transit}
+      - --restrict-to=openvpn:1195
+    expose:
+      - "8080"
+
   # The panel's own node agent. Remote nodes run this same image against
   # AEOLUS_DOMAIN with a token from the panel.
   anemoi:

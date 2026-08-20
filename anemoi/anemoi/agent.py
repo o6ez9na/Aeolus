@@ -394,10 +394,12 @@ def run() -> None:
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
 
+    # Deliberately not seeded from the .revision file on disk. That file says
+    # which revision was last applied, not what is actually there: an agent that
+    # was upgraded since — or a file someone removed by hand — leaves the two
+    # disagreeing, and claiming the revision would make the panel answer
+    # "unchanged" forever. The first pull after a start is always a full one.
     revision = ""
-    revision_file = cfg.config_dir / ".revision"
-    if revision_file.exists():
-        revision = revision_file.read_text().strip()
 
     while running:
         try:

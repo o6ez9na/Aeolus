@@ -44,15 +44,23 @@ Running the installer again updates the tree and rebuilds the containers without
 touching `.env` — `AEOLUS_PKI_SECRET` is what every stored private key is
 encrypted with, and regenerating it would make the whole PKI unreadable.
 
+A node carries its tunnel to the panel inside a WebSocket on 443 from the
+start. Some networks let an OpenVPN handshake through and then kill the flow
+whatever port or protocol it uses; inside a real TLS session there is nothing
+left to recognise. It costs a little throughput, so a node on a network that
+does not need it can be switched to a direct tunnel with the **ws** button in
+the node list.
+
 A node prints the fingerprint of the key it generated and waits. It receives
 nothing — no certificate, no address, no configuration — until an operator
 accepts that fingerprint in the panel under **узлы → заявки**. Comparing the two
 strings is the only thing separating your mesh from anyone else who knows the
 domain.
 
-Ports to leave open: panel `80`, `443`, `1194/udp`, `8443/tcp` (clients),
-`1195/udp` (nodes) and `50051/tcp` (agents); a node needs no inbound port at
-all beyond the VPN it serves.
+Ports to leave open on the panel: `80`, `443` (panel and the obfuscated
+transit), `1194/udp` and `8443/tcp` (clients), `1195/udp` + `1195/tcp` (nodes
+on a direct tunnel) and `50051/tcp` (agents). A node needs no inbound port at
+all: everything it does is outbound.
 
 Set `AEOLUS_LANG=ru` (or `en`) to skip the language question.
 
@@ -171,3 +179,13 @@ Next, in order:
 3. The `anemoi` gRPC agent and its mTLS enrolment, so remote nodes report status and
    receive CRL and CCD updates.
 4. `moirai`: client-facing config distribution.
+
+### Redeploying by hand
+
+`deploy/Caddyfile` is bind-mounted as a single file, and rsync replaces it with
+a new inode — the running container keeps the old one. Recreate rather than
+reload it when that file changes:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --force-recreate caddy
+```

@@ -92,6 +92,13 @@ remote-cert-tls client
 tun-mtu {settings.vpn_tun_mtu}
 mssfix {settings.vpn_mssfix}
 
+# Follow a session that changes source port. Home routers routinely remap the
+# port of a long-lived UDP flow, and without this the server keeps answering the
+# port it first saw: the peer hears nothing, times out and reconnects, forever.
+# Safe because a packet only moves the session after it authenticates, which
+# tls-crypt and the HMAC already require.
+float
+
 keepalive 10 120
 persist-key
 persist-tun
@@ -163,6 +170,13 @@ remote-cert-tls client
 
 tun-mtu {settings.vpn_tun_mtu}
 mssfix {settings.vpn_mssfix}
+
+# Follow a session that changes source port. Home routers routinely remap the
+# port of a long-lived UDP flow, and without this the server keeps answering the
+# port it first saw: the peer hears nothing, times out and reconnects, forever.
+# Safe because a packet only moves the session after it authenticates, which
+# tls-crypt and the HMAC already require.
+float
 
 keepalive 10 60
 persist-key

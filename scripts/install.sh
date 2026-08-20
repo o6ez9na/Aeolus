@@ -432,9 +432,17 @@ detect_wan_iface() {
 detect_lan_subnet() {
   # The kernel's own connected route, so the answer is right for masks that are
   # not /24 — deriving it from the address by hand gets those wrong.
-  local iface="$1"
+  #
+  # A VPS with a /32 address often carries a link-scope 0.0.0.0/0 here. That is
+  # the uplink, not a LAN, and announcing it would ask the panel to route every
+  # client's traffic into this node. Suggest nothing rather than that.
+  local iface="$1" guess=""
   [ -n "$iface" ] || return 0
-  ip -4 route show dev "$iface" scope link 2>/dev/null | awk '{print $1; exit}' || true
+  guess="$(ip -4 route show dev "$iface" scope link 2>/dev/null | awk '{print $1; exit}' || true)"
+  case "$guess" in
+    0.0.0.0/0|default|*/0|*/32) return 0 ;;
+  esac
+  echo "$guess"
 }
 
 # --- panel -----------------------------------------------------------------

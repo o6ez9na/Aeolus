@@ -40,7 +40,7 @@ def validate_host(host: int) -> int:
     return host
 
 
-def validate_network(value: str) -> str:
+def validate_network(value: str, *, allow_default: bool = False) -> str:
     """Accept a CIDR network and return it normalised."""
     try:
         network = ipaddress.ip_network(value.strip(), strict=False)
@@ -48,6 +48,15 @@ def validate_network(value: str) -> str:
         raise CcdError(f"{value!r} — не сеть в формате CIDR: {exc}") from None
     if network.version != 4:
         raise CcdError("OpenVPN здесь работает только с IPv4")
+    if not allow_default and network.prefixlen < 8:
+        # A node announcing 0.0.0.0/0 as its LAN would have the panel route every
+        # client's traffic into that one tunnel. Sending all traffic through a
+        # node is a separate decision an operator makes per client, not something
+        # the node gets to claim about itself.
+        raise CcdError(
+            f"{network} слишком широкая: узел объявляет свои локальные сети, "
+            "а не весь интернет. Выход в интернет выдаётся клиенту отдельно."
+        )
     return str(network)
 
 

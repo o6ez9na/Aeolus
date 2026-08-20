@@ -23,6 +23,10 @@ services:
     # Published ports are meaningless in the host namespace, and compose refuses
     # to combine the two.
     ports: !reset []
+    # ip_forward belongs to the host here, and runc refuses to set a namespaced
+    # sysctl for a namespace the container does not own. The installer enables
+    # it on the host instead.
+    sysctls: !reset {}
 
   anemoi:
     build:

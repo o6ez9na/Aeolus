@@ -53,6 +53,30 @@ if [ -f "$CONFIG_DIR/server.conf" ]; then
     done
 fi
 
+# What a node masquerades: the hub's client pools, which arrive over the transit
+# tunnel and leave through this machine's uplink. The panel decides the list; an
+# empty file means this machine is the hub, which NATs from its routing plan.
+NAT_CHAIN=AEOLUS-NODE-NAT
+apply_node_nat() {
+    [ -f "$CONFIG_DIR/nat-subnets" ] || return 0
+    iptables -t nat -N "$NAT_CHAIN" 2>/dev/null || true
+    iptables -t nat -F "$NAT_CHAIN"
+    iptables -t nat -C POSTROUTING -j "$NAT_CHAIN" 2>/dev/null || \
+        iptables -t nat -I POSTROUTING 1 -j "$NAT_CHAIN"
+
+    iptables -N "$NAT_CHAIN" 2>/dev/null || true
+    iptables -F "$NAT_CHAIN"
+    iptables -C FORWARD -j "$NAT_CHAIN" 2>/dev/null || iptables -I FORWARD 1 -j "$NAT_CHAIN"
+
+    while read -r subnet; do
+        [ -n "$subnet" ] || continue
+        iptables -t nat -A "$NAT_CHAIN" -s "$subnet" -o "$UPLINK" -j MASQUERADE
+        iptables -A "$NAT_CHAIN" -s "$subnet" -j ACCEPT
+        iptables -A "$NAT_CHAIN" -d "$subnet" -m conntrack \
+            --ctstate ESTABLISHED,RELATED -j ACCEPT
+    done < "$CONFIG_DIR/nat-subnets"
+}
+
 mkdir -p /run/openvpn
 
 openvpn_pid=""
@@ -104,6 +128,24 @@ trap shutdown TERM INT
 start_openvpn
 seen_flag=$(cat "$RESTART_FLAG" 2>/dev/null || echo "")
 
+# The routing plan says which client may reach what and where the rest of its
+# traffic goes. It is applied here rather than by the panel because the tunnels
+# live in this namespace.
+PLAN="$CONFIG_DIR/routing.json"
+seen_plan=""
+apply_plan() {
+    [ -f "$PLAN" ] || return 0
+    current=$(sha256sum "$PLAN" | cut -d" " -f1)
+    [ "$current" = "$seen_plan" ] && return 0
+    if /usr/local/bin/apply-routing.sh "$PLAN"; then
+        seen_plan="$current"
+    else
+        echo "routing plan rejected, keeping the previous rules" >&2
+    fi
+}
+apply_plan
+apply_node_nat
+
 # The agent rewrites server.conf when the panel changes it and touches the flag.
 # The CRL and ccd are re-read by OpenVPN itself, so only server.conf needs this.
 while true; do
@@ -134,6 +176,11 @@ while true; do
         start_openvpn
         continue
     fi
+
+    # Rules follow the tunnels: a client that just got an exit must not wait for
+    # a restart to get it.
+    apply_plan
+    apply_node_nat
 
     current_flag=$(cat "$RESTART_FLAG" 2>/dev/null || echo "")
     if [ "$current_flag" != "$seen_flag" ]; then

@@ -56,11 +56,14 @@ class Settings(BaseSettings):
     # OpenVPN on the panel host. The directory is a volume shared with the
     # openvpn container.
     openvpn_config_dir: str = "/etc/openvpn/aeolus"
-    vpn_subnet: str = "10.8.0.0"
+    # Deliberately not 10.8.0.0/24: that is the default of half the VPN stacks
+    # out there, and a node running one of them would treat the panel's client
+    # pool as its own local network and send the return path the wrong way.
+    vpn_subnet: str = "10.20.0.0"
     vpn_netmask: str = "255.255.255.0"
     # The TCP listener needs a pool of its own; two OpenVPN instances cannot
     # hand out the same addresses.
-    vpn_tcp_subnet: str = "10.9.0.0"
+    vpn_tcp_subnet: str = "10.21.0.0"
     # Not 443: the panel's own HTTPS already owns that port on the same host.
     master_tcp_port: int | None = 8443
     # Transit: the tunnel every node dials into. Clients never touch this

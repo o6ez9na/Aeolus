@@ -169,6 +169,12 @@ class Client(Base, UUIDMixin, TimestampMixin):
         ForeignKey("nodes.id", ondelete="SET NULL")
     )
 
+    # Host part of this client's address in the hub's tunnel. Assigned on
+    # creation and never reused while the client exists: every firewall rule and
+    # routing decision about this client is written by address, so the address
+    # has to be the client's own rather than whatever the pool handed out today.
+    tunnel_host: Mapped[int | None] = mapped_column(Integer, unique=True)
+
     # PKI. The key is kept encrypted so the .ovpn can be handed out again; anyone
     # who can read it can already mint new certificates from the CA next to it.
     cert_serial: Mapped[str | None] = mapped_column(String(64), unique=True)
@@ -216,7 +222,14 @@ class ClientNodeGrant(Base, UUIDMixin, TimestampMixin):
     # Host part of the fixed tunnel address, not the address itself: a node runs
     # a UDP and a TCP listener on two different subnets, and the same client has
     # to land on the same host number whichever one it reaches.
+    #
+    # Only meaningful for a node that serves clients directly, which since the
+    # hub model means the panel itself; Client.tunnel_host is what the hub uses.
     static_host: Mapped[int | None] = mapped_column(Integer)
+
+    # Send this client's whole internet out through this node. A client has one
+    # default route, so at most one of its grants may carry this.
+    is_exit: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Networks pushed to this client, as CIDR strings.
     push_routes: Mapped[list[str] | None] = mapped_column(JSON)

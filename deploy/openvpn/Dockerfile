@@ -13,7 +13,7 @@ RUN set -eux; \
     ; do \
         for attempt in 1 2 3; do \
             printf '%s/v3.22/main\n%s/v3.22/community\n' "$mirror" "$mirror" >/etc/apk/repositories; \
-            if apk add --no-cache openvpn iptables ip6tables; then exit 0; fi; \
+            if apk add --no-cache openvpn iptables ip6tables iproute2 jq; then exit 0; fi; \
             echo "apk failed on $mirror (attempt $attempt), retrying"; \
             sleep 3; \
         done; \
@@ -22,7 +22,8 @@ RUN set -eux; \
     exit 1
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY apply-routing.sh /usr/local/bin/apply-routing.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/apply-routing.sh
 
 # Config and certificates arrive through a volume the panel writes to.
 VOLUME /etc/openvpn/aeolus

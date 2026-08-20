@@ -77,7 +77,16 @@ def _route_line(directive: str, network: str) -> str:
     return f"{directive} {net.network_address} {net.netmask}"
 
 
-def render(grant: ClientNodeGrant, common_name: str, *, proto: str, allowed: bool) -> str:
+def render(
+    grant: ClientNodeGrant,
+    common_name: str,
+    *,
+    proto: str,
+    allowed: bool,
+    tunnel_host: int | None = None,
+    default_route: bool = False,
+    routes: list[str] | None = None,
+) -> str:
     """The ccd file for one client on one listener of one node.
 
     A client without a grant still gets a file: OpenVPN accepts any certificate
@@ -88,10 +97,24 @@ def render(grant: ClientNodeGrant, common_name: str, *, proto: str, allowed: boo
 
     lines = [f"# {common_name} — сгенерировано Aeolus, править вручную бесполезно"]
 
-    if grant.static_host is not None:
-        address = static_address(proto, grant.static_host)
+    # The client's own address wins: on the hub every rule about this client is
+    # written against it, so the ccd file has to hand out that one and no other.
+    host = tunnel_host if tunnel_host is not None else grant.static_host
+    if host is not None:
+        address = static_address(proto, host)
         # topology subnet: the second argument is the mask, not a peer address.
         lines.append(f"ifconfig-push {address} {settings.vpn_netmask}")
+
+    # The default route is a per-client decision: only a client that exits
+    # somewhere gets one, or the rest would send everything into a tunnel that
+    # drops it.
+    if default_route:
+        lines.append('push "redirect-gateway def1 bypass-dhcp"')
+
+    # What this client may reach, so it routes those networks into the tunnel
+    # without taking the default route with them.
+    for network in routes or []:
+        lines.append(f'push "{_route_line("route", network)}"')
 
     for network in grant.push_routes or []:
         lines.append(f'push "{_route_line("route", network)}"')

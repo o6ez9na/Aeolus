@@ -17,8 +17,8 @@ services:
     sysctls:
       net.ipv4.ip_forward: 1
     environment:
-      AEOLUS_VPN_SUBNET: ${AEOLUS_VPN_SUBNET:-10.8.0.0}
-      AEOLUS_VPN_TCP_SUBNET: ${AEOLUS_VPN_TCP_SUBNET:-10.9.0.0}
+      AEOLUS_VPN_SUBNET: ${AEOLUS_VPN_SUBNET:-10.20.0.0}
+      AEOLUS_VPN_TCP_SUBNET: ${AEOLUS_VPN_TCP_SUBNET:-10.21.0.0}
       AEOLUS_VPN_MASK_BITS: ${AEOLUS_VPN_MASK_BITS:-24}
     ports:
       - "${AEOLUS_VPN_PORT:-1194}:1194/udp"

@@ -107,6 +107,9 @@ class ClientRead(BaseModel):
     expires_at: datetime | None
     traffic_limit_bytes: int | None
     traffic_used_bytes: int
+    tunnel_host: int | None = None
+    tunnel_address: str | None = None
+    exit_node_id: uuid.UUID | None = None
     cert_serial: str | None
     cert_not_after: datetime | None
     last_seen_at: datetime | None

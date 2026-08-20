@@ -10,7 +10,7 @@ from app.api.deps import CurrentUser, OperatorUser, SessionDep
 from app.core.crypto import SecretUnreadableError
 from app.models.node import Client, ClientNodeGrant, Node
 from app.schemas.node import ClientCreate, ClientRead, ClientUpdate
-from app.services import audit, openvpn, pki
+from app.services import audit, openvpn, pki, routing
 
 router = APIRouter(prefix="/clients", tags=["clients"])
 
@@ -18,6 +18,10 @@ router = APIRouter(prefix="/clients", tags=["clients"])
 def _serialize(client: Client) -> ClientRead:
     data = ClientRead.model_validate(client)
     data.node_ids = [grant.node_id for grant in client.grants]
+    if client.tunnel_host is not None:
+        data.tunnel_address = openvpn.static_address("udp", client.tunnel_host)
+    exit_grant = next((g for g in client.grants if g.is_exit), None)
+    data.exit_node_id = exit_grant.node_id if exit_grant else None
     return data
 
 
@@ -64,6 +68,9 @@ async def create_client(
         created_by_id=user.id,
     )
     client.grants = [ClientNodeGrant(node_id=node_id) for node_id in body.node_ids]
+    # An address is part of being a client: the hub writes every rule about it
+    # by address, so one is reserved now rather than when it first connects.
+    await routing.ensure_tunnel_host(session, client)
     session.add(client)
     try:
         # Flush first: the id is generated here, and the audit entry needs it.
@@ -84,6 +91,7 @@ async def create_client(
         target_label=client.common_name,
         detail={"node_ids": body.node_ids, "expires_at": body.expires_at},
     )
+    await openvpn.sync_routing_plan(session)
     await session.commit()
 
     return _serialize(await _load(session, client.id))
@@ -125,30 +133,32 @@ async def update_client(
         target_label=client.common_name,
         detail=audit.changed_fields(body.model_dump(exclude_unset=True)),
     )
+    await openvpn.sync_routing_plan(session)
     await session.commit()
     return _serialize(await _load(session, client_id))
 
 
-@router.get("/{client_id}/config/{node_id}", response_class=PlainTextResponse)
+@router.get("/{client_id}/config", response_class=PlainTextResponse)
 async def download_client_config(
     client_id: uuid.UUID,
-    node_id: uuid.UUID,
     request: Request,
     session: SessionDep,
     user: OperatorUser,
 ) -> str:
-    """Build the .ovpn for this client on this node."""
+    """The client's .ovpn. There is one, and it points at the hub.
+
+    A client no longer dials a node: it dials the panel, which forwards it into
+    whichever node it was granted. So the profile carries no node address at
+    all, and changing a client's exit does not mean reissuing it.
+    """
     client = await _load(session, client_id)
 
-    if node_id not in {grant.node_id for grant in client.grants}:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            "Client is not granted access to that node",
-        )
-
-    node = await session.get(Node, node_id)
+    node = await session.scalar(select(Node).where(Node.is_hub.is_(True)))
     if node is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Node not found")
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "панель ещё не зарегистрировала себя как узел",
+        )
 
     try:
         ca = await pki.require_ca(session)
@@ -168,7 +178,7 @@ async def download_client_config(
         target_type="client",
         target_id=client.id,
         target_label=client.common_name,
-        detail={"node": node.name},
+        detail={"via": node.name},
     )
     await session.commit()
     return config
@@ -222,4 +232,6 @@ async def delete_client(
         detail={"cert_serial": client.cert_serial, "revoked": client.cert_serial is not None},
     )
     await session.delete(client)
+    await session.flush()
+    await openvpn.sync_routing_plan(session)
     await session.commit()

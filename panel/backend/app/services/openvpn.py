@@ -57,7 +57,9 @@ topology subnet
 # explicit ifconfig-pool unless `server` is told not to define one itself.
 server {tunnel_subnet(proto)} {settings.vpn_netmask} nopool
 ifconfig-pool {pool_start} {pool_end} {settings.vpn_netmask}
-push "redirect-gateway def1 bypass-dhcp"
+# No global redirect-gateway: whether a client's default route comes here is a
+# per-client decision, pushed from its ccd file. Sending it to everyone would
+# blackhole the clients that are only allowed to reach a couple of subnets.
 push "dhcp-option DNS {settings.vpn_dns}"
 
 ca ca.crt
@@ -281,6 +283,31 @@ async def sync_local_crl(session) -> bool:
     crl_pem = await pki.build_crl(session)
     (target / "crl.pem").write_text(crl_pem)
     logger.warning("Refreshed CRL at %s", target / "crl.pem")
+    return True
+
+
+async def sync_routing_plan(session) -> bool:
+    """Write the routing plan the local supervisor applies.
+
+    Runs on every change that can affect who may reach what — a grant, an exit,
+    a client's status — because a rule that has not reached the kernel is not a
+    rule at all.
+    """
+    from app.services import routing
+
+    target = Path(settings.openvpn_config_dir)
+    if not target.exists():
+        return False
+
+    plan = await routing.build_plan(session)
+    path = target / "routing.json"
+    rendered = routing.render(plan)
+    if path.exists() and path.read_text() == rendered:
+        return False
+
+    path.write_text(rendered)
+    path.chmod(0o644)
+    logger.warning("Wrote routing plan %s to %s", plan["revision"], path)
     return True
 
 

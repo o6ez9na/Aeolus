@@ -26,7 +26,7 @@ from app.models.node import (
     NodeStatus,
 )
 from app.services import ccd as ccd_service
-from app.services import openvpn, pki
+from app.services import openvpn, pki, routing
 
 logger = logging.getLogger("aeolus.agent")
 
@@ -281,6 +281,9 @@ async def build_config(session: AsyncSession, node: Node) -> dict:
         "transit_conf": transit_conf,
         "ccd_transit": ccd_transit,
         "is_hub": node.is_hub,
+        # A node NATs the hub's client pools out its own uplink: that is what
+        # "this client's internet leaves through that node" means on the wire.
+        "nat_subnets": [] if node.is_hub else routing.node_nat_subnets(),
     }
 
     # The CRL carries a timestamp, so hashing it would change the revision on
@@ -295,6 +298,8 @@ async def build_config(session: AsyncSession, node: Node) -> dict:
         "transit_conf",
     ):
         digest.update(payload[key].encode())
+    for subnet in payload["nat_subnets"]:
+        digest.update(subnet.encode())
     for entries in (ccd, ccd_tcp, ccd_transit):
         for name in sorted(entries):
             digest.update(name.encode())
@@ -347,12 +352,40 @@ async def _build_ccd(session: AsyncSession, node: Node, *, proto: str) -> dict[s
         )
     )
 
+    # On the hub a client's file describes its whole world: the address it gets,
+    # the networks it may reach, and whether its default route comes here.
+    subnets_by_node: dict = {}
+    if node.is_hub:
+        subnets_by_node = {
+            other.id: (other.subnets or [])
+            for other in await session.scalars(
+                select(Node).where(
+                    Node.approval == NodeApproval.approved, Node.is_enabled.is_(True)
+                )
+            )
+        }
+
     entries: dict[str, str] = {}
     for client in clients:
         grant = next((g for g in client.grants if g.node_id == node.id), None)
         allowed = grant is not None and client.status == ClientStatus.active
+
+        default_route = False
+        routes: list[str] = []
+        if node.is_hub and allowed:
+            for held in client.grants:
+                if held.is_exit:
+                    default_route = True
+                routes.extend(subnets_by_node.get(held.node_id, []))
+
         entries[client.common_name] = ccd_service.render(
-            grant, client.common_name, proto=proto, allowed=allowed
+            grant,
+            client.common_name,
+            proto=proto,
+            allowed=allowed,
+            tunnel_host=client.tunnel_host if node.is_hub else None,
+            default_route=default_route,
+            routes=sorted(set(routes)),
         )
     return entries
 

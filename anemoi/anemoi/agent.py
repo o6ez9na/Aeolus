@@ -322,6 +322,9 @@ def apply_config(cfg: Config, response) -> bool:
     }
     if response.server_conf_tcp:
         files["server-tcp.conf"] = response.server_conf_tcp
+    # The supervisor reads this to decide what to masquerade; one subnet per
+    # line, empty on the hub, which NATs from its routing plan instead.
+    files["nat-subnets"] = "".join(f"{net}\n" for net in response.nat_subnets)
     if response.transit_conf:
         files["transit.conf"] = response.transit_conf
         if not response.is_hub:
@@ -335,7 +338,7 @@ def apply_config(cfg: Config, response) -> bool:
         # An empty payload means "this node does not run that", not "write an
         # empty file": an empty server.conf would still be started by the
         # supervisor. The loop above has already removed a file that went away.
-        if not content:
+        if not content and name != "nat-subnets":
             continue
         path = cfg.config_dir / name
         if path.exists() and path.read_text() == content:

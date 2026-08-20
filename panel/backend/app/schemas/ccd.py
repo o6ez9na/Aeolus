@@ -3,6 +3,12 @@ import uuid
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ExitUpdate(BaseModel):
+    """Route this client's whole internet through this node, or stop doing so."""
+
+    is_exit: bool
+
+
 class CcdUpdate(BaseModel):
     """Per-client settings on one node. Unset fields are left alone."""
 
@@ -21,6 +27,11 @@ class CcdRead(BaseModel):
     client_name: str
     client_status: str
     node_name: str
+    node_is_hub: bool = False
+    is_exit: bool = False
+    # The client's address on the hub, which every rule about it is written by.
+    tunnel_address: str | None = None
+    node_subnets: list[str] = []
     static_host: int | None = None
     # The addresses that host number turns into, one per listener.
     static_address: str | None = None

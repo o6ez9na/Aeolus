@@ -63,6 +63,7 @@ class NodeAgentServicer(agent_pb2_grpc.NodeAgentServicer):
                 transit_conf=payload["transit_conf"],
                 ccd_transit=payload["ccd_transit"],
                 is_hub=payload["is_hub"],
+                nat_subnets=payload["nat_subnets"],
             )
 
     async def ReportStatus(self, request, context):

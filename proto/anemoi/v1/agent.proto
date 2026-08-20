@@ -45,6 +45,9 @@ message ConfigResponse {
   // behind it.
   map<string, string> ccd_transit = 13;
   bool is_hub = 14;
+  // Networks the node masquerades out its own uplink: the hub's client pools,
+  // which reach it through the transit tunnel.
+  repeated string nat_subnets = 15;
 }
 
 message Session {

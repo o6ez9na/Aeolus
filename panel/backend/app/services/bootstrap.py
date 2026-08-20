@@ -16,7 +16,8 @@ from app.core.config import settings
 from app.core.security import hash_password
 from app.models.node import Node, NodeApproval, NodeRole
 from app.models.user import User, UserRole
-from app.services import agent, openvpn, pki
+from app.models.node import Client
+from app.services import agent, openvpn, pki, routing
 
 logger = logging.getLogger("aeolus.bootstrap")
 
@@ -92,8 +93,21 @@ async def ensure_master_node(session: AsyncSession) -> None:
         await pki.issue_server_cert(session, node)
         logger.warning("Issued server certificate for panel node %r", node.name)
 
+    await ensure_client_addresses(session)
     await write_master_bundle(session, node)
+    await openvpn.sync_routing_plan(session)
     await _ensure_local_enrollment_token(session, node)
+
+
+async def ensure_client_addresses(session: AsyncSession) -> None:
+    """Give every client an address of its own.
+
+    Clients created before the hub model have none, and without one there is
+    nothing to write a firewall rule against.
+    """
+    for client in await session.scalars(select(Client).where(Client.tunnel_host.is_(None))):
+        await routing.ensure_tunnel_host(session, client)
+        logger.warning("Assigned %s tunnel host %s", client.common_name, client.tunnel_host)
 
 
 async def _ensure_local_enrollment_token(session: AsyncSession, node: Node) -> None:

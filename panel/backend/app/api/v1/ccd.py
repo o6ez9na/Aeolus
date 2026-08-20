@@ -8,8 +8,8 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import CurrentUser, OperatorUser, SessionDep
 from app.core.config import settings
 from app.models.node import ClientNodeGrant, ClientStatus
-from app.schemas.ccd import CcdLimits, CcdRead, CcdUpdate
-from app.services import audit, ccd, openvpn
+from app.schemas.ccd import CcdLimits, CcdRead, CcdUpdate, ExitUpdate
+from app.services import audit, ccd, openvpn, routing
 
 router = APIRouter(prefix="/ccd", tags=["ccd"])
 
@@ -23,6 +23,14 @@ def _serialize(grant: ClientNodeGrant) -> CcdRead:
         client_name=grant.client.common_name,
         client_status=grant.client.status.value,
         node_name=grant.node.name,
+        node_is_hub=grant.node.is_hub,
+        is_exit=grant.is_exit,
+        node_subnets=grant.node.subnets or [],
+        tunnel_address=(
+            openvpn.static_address("udp", grant.client.tunnel_host)
+            if grant.client.tunnel_host is not None
+            else None
+        ),
         static_host=grant.static_host,
         static_address=(
             openvpn.static_address("udp", grant.static_host)
@@ -117,6 +125,8 @@ async def update_entry(
     )
 
     try:
+        await session.flush()
+        await openvpn.sync_routing_plan(session)
         await session.commit()
     except IntegrityError:
         await session.rollback()
@@ -126,4 +136,53 @@ async def update_entry(
             "этот адрес уже закреплён за другим клиентом на этом узле",
         ) from None
 
+    return _serialize(await _load(session, grant_id))
+
+
+@router.post("/{grant_id}/exit", response_model=CcdRead)
+async def set_exit(
+    grant_id: uuid.UUID,
+    body: ExitUpdate,
+    request: Request,
+    session: SessionDep,
+    user: OperatorUser,
+) -> CcdRead:
+    """Send this client's whole internet through this node.
+
+    A machine has one default route, so a client may exit through one node at a
+    time; asking for a second one is refused rather than silently reshuffled.
+    """
+    grant = await _load(session, grant_id)
+
+    if body.is_exit:
+        other = await session.scalar(
+            select(ClientNodeGrant)
+            .where(
+                ClientNodeGrant.client_id == grant.client_id,
+                ClientNodeGrant.id != grant.id,
+                ClientNodeGrant.is_exit.is_(True),
+            )
+            .options(selectinload(ClientNodeGrant.node))
+        )
+        if other is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"весь трафик этого клиента уже идёт через {other.node.name}; "
+                "клиент может выходить только через один узел",
+            )
+
+    grant.is_exit = body.is_exit
+    await audit.record(
+        session,
+        "ccd.exit",
+        actor=user,
+        request=request,
+        target_type="ccd",
+        target_id=grant.id,
+        target_label=f"{grant.client.common_name}@{grant.node.name}",
+        detail={"is_exit": body.is_exit},
+    )
+    await session.flush()
+    await openvpn.sync_routing_plan(session)
+    await session.commit()
     return _serialize(await _load(session, grant_id))

@@ -18,7 +18,42 @@ registered with `role = master`, so a client can connect to the panel and exit t
 It gets its own `anemoi` agent rather than a special code path, so the panel talks to
 the local node exactly the way it talks to remote ones.
 
-## Run it
+## Install with one command
+
+On a fresh Debian or Ubuntu box, as root. It asks whether this machine is the
+panel or a node, installs Docker if missing, and brings the stack up:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/o6ez9na/Aeolus/main/scripts/install.sh | sudo bash
+```
+
+Non-interactive:
+
+```sh
+# the hub: web UI, database, the endpoint clients and nodes dial
+curl -fsSL .../install.sh | sudo AEOLUS_DOMAIN=vpn.example.com bash -s -- panel
+
+# an exit node, reporting to that panel
+curl -fsSL .../install.sh | sudo AEOLUS_PANEL_DOMAIN=vpn.example.com \
+  AEOLUS_NODE_NAME=frankfurt-01 AEOLUS_NODE_SUBNETS=192.168.5.0/24 bash -s -- node
+```
+
+The panel generates its own secrets on first run and prints the admin password.
+Running the installer again updates the tree and rebuilds the containers without
+touching `.env` — `AEOLUS_PKI_SECRET` is what every stored private key is
+encrypted with, and regenerating it would make the whole PKI unreadable.
+
+A node prints the fingerprint of the key it generated and waits. It receives
+nothing — no certificate, no address, no configuration — until an operator
+accepts that fingerprint in the panel under **узлы → заявки**. Comparing the two
+strings is the only thing separating your mesh from anyone else who knows the
+domain.
+
+Ports to leave open: panel `80`, `443`, `1194/udp`, `8443/tcp` (clients),
+`1195/udp` (nodes) and `50051/tcp` (agents); a node needs no inbound port at
+all beyond the VPN it serves.
+
+## Run it by hand
 
 ```sh
 cp .env.example .env

@@ -7,15 +7,15 @@ VPN_TCP_SUBNET=${AEOLUS_VPN_TCP_SUBNET:-10.9.0.0}
 VPN_MASK=${AEOLUS_VPN_MASK_BITS:-24}
 RESTART_FLAG="$CONFIG_DIR/.restart"
 
-# The panel writes the bundle on startup, so the first boot can race it.
+# On the panel host the backend writes the bundle at startup, so this is a short
+# race. On a node the config only arrives once an operator has accepted the join
+# request, which can take as long as it takes — so wait rather than give up.
 attempt=0
 while [ ! -f "$CONFIG_DIR/server.conf" ]; do
     attempt=$((attempt + 1))
-    if [ "$attempt" -gt 60 ]; then
-        echo "no $CONFIG_DIR/server.conf after 60 tries; is the panel running?" >&2
-        exit 1
+    if [ $((attempt % 15)) -eq 1 ]; then
+        echo "waiting for $CONFIG_DIR/server.conf — the panel writes it once this node is accepted"
     fi
-    echo "waiting for the panel to write $CONFIG_DIR/server.conf ($attempt/60)"
     sleep 2
 done
 

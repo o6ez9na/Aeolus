@@ -1,0 +1,56 @@
+# A node: OpenVPN plus the anemoi agent, and nothing else.
+#
+#   docker compose -f docker-compose.node.yml up -d --build
+#
+# There is no database and no panel here. The agent announces this machine to
+# the panel, waits to be accepted, and then keeps its OpenVPN in sync with what
+# the panel says. Everything it needs travels outbound, so this host needs no
+# inbound port beyond the VPN itself.
+services:
+  openvpn:
+    build: ./deploy/openvpn
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      net.ipv4.ip_forward: 1
+    environment:
+      AEOLUS_VPN_SUBNET: ${AEOLUS_VPN_SUBNET:-10.8.0.0}
+      AEOLUS_VPN_TCP_SUBNET: ${AEOLUS_VPN_TCP_SUBNET:-10.9.0.0}
+      AEOLUS_VPN_MASK_BITS: ${AEOLUS_VPN_MASK_BITS:-24}
+    ports:
+      - "${AEOLUS_VPN_PORT:-1194}:1194/udp"
+      - "${AEOLUS_VPN_TCP_PORT:-8443}:8443/tcp"
+    volumes:
+      - openvpn-config:/etc/openvpn/aeolus
+      - openvpn-run:/run/openvpn
+
+  anemoi:
+    build:
+      context: .
+      dockerfile: anemoi/Dockerfile
+    restart: unless-stopped
+    environment:
+      # gRPC and the HTTPS API of the panel. The agent dials both; the panel
+      # never dials back.
+      ANEMOI_PANEL: ${AEOLUS_PANEL_DOMAIN:?set AEOLUS_PANEL_DOMAIN in .env}:${AEOLUS_GRPC_PORT:-50051}
+      ANEMOI_PANEL_API: https://${AEOLUS_PANEL_DOMAIN}
+      # What this node calls itself in the join request. The panel sanitises it
+      # and may rename on collision.
+      ANEMOI_NODE_NAME: ${AEOLUS_NODE_NAME:-}
+      # LANs behind this node, comma separated CIDRs, routed to clients that are
+      # granted access to it.
+      ANEMOI_SUBNETS: ${AEOLUS_NODE_SUBNETS:-}
+      ANEMOI_WAN_IFACE: ${AEOLUS_NODE_WAN_IFACE:-}
+      ANEMOI_INTERVAL: ${ANEMOI_INTERVAL:-15}
+    volumes:
+      - openvpn-config:/etc/openvpn/aeolus
+      - anemoi-state:/var/lib/anemoi
+      - openvpn-run:/run/openvpn:ro
+
+volumes:
+  openvpn-config:
+  openvpn-run:
+  anemoi-state:

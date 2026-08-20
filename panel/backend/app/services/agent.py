@@ -260,11 +260,15 @@ async def build_config(session: AsyncSession, node: Node) -> dict:
     ccd_tcp = await _build_ccd(session, node, proto="tcp") if node.tcp_port else {}
     transit_conf, ccd_transit = await _build_transit(session, node)
 
+    # Only the hub faces clients. A node used to run its own client listener,
+    # which now serves no purpose and actively hurts: it would claim the client
+    # pool's addresses and ports on a machine that may already be routing
+    # something else.
     payload = {
-        "server_conf": openvpn.render_server_config(node),
+        "server_conf": openvpn.render_server_config(node) if node.is_hub else "",
         "server_conf_tcp": (
             openvpn.render_server_config(node, proto="tcp", port=node.tcp_port)
-            if node.tcp_port
+            if node.is_hub and node.tcp_port
             else ""
         ),
         "ca_pem": ca.cert_pem,

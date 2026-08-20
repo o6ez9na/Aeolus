@@ -7,14 +7,18 @@ VPN_TCP_SUBNET=${AEOLUS_VPN_TCP_SUBNET:-10.9.0.0}
 VPN_MASK=${AEOLUS_VPN_MASK_BITS:-24}
 RESTART_FLAG="$CONFIG_DIR/.restart"
 
+# The hub gets server.conf (the listener clients dial); every other node gets
+# only transit.conf (the tunnel it dials to the hub). Wait for whichever this
+# machine is meant to run.
+#
 # On the panel host the backend writes the bundle at startup, so this is a short
 # race. On a node the config only arrives once an operator has accepted the join
 # request, which can take as long as it takes — so wait rather than give up.
 attempt=0
-while [ ! -f "$CONFIG_DIR/server.conf" ]; do
+while [ ! -f "$CONFIG_DIR/server.conf" ] && [ ! -f "$CONFIG_DIR/transit.conf" ]; do
     attempt=$((attempt + 1))
     if [ $((attempt % 15)) -eq 1 ]; then
-        echo "waiting for $CONFIG_DIR/server.conf — the panel writes it once this node is accepted"
+        echo "waiting for a config in $CONFIG_DIR — the panel writes one once this node is accepted"
     fi
     sleep 2
 done
@@ -27,14 +31,20 @@ fi
 
 # Clients leave through this container's own interface, which Docker then NATs
 # to the host. Keeping NAT in here means the host firewall is left alone.
+#
+# Only where clients actually land: a node has no client pool of its own, and
+# these rules may run in the host's tables when it shares the namespace, on a
+# machine that could already be routing the very same range.
 UPLINK=$(ip -4 route show default | awk '{print $5; exit}')
-for subnet in "$VPN_SUBNET/$VPN_MASK" "$VPN_TCP_SUBNET/$VPN_MASK"; do
-    if ! iptables -t nat -C POSTROUTING -s "$subnet" -o "$UPLINK" -j MASQUERADE 2>/dev/null; then
-        iptables -t nat -A POSTROUTING -s "$subnet" -o "$UPLINK" -j MASQUERADE
-    fi
-    iptables -A FORWARD -s "$subnet" -j ACCEPT
-    iptables -A FORWARD -d "$subnet" -m state --state ESTABLISHED,RELATED -j ACCEPT
-done
+if [ -f "$CONFIG_DIR/server.conf" ]; then
+    for subnet in "$VPN_SUBNET/$VPN_MASK" "$VPN_TCP_SUBNET/$VPN_MASK"; do
+        if ! iptables -t nat -C POSTROUTING -s "$subnet" -o "$UPLINK" -j MASQUERADE 2>/dev/null; then
+            iptables -t nat -A POSTROUTING -s "$subnet" -o "$UPLINK" -j MASQUERADE
+        fi
+        iptables -A FORWARD -s "$subnet" -j ACCEPT
+        iptables -A FORWARD -d "$subnet" -m state --state ESTABLISHED,RELATED -j ACCEPT
+    done
+fi
 
 mkdir -p /run/openvpn
 
@@ -43,9 +53,12 @@ openvpn_tcp_pid=""
 openvpn_transit_pid=""
 
 start_openvpn() {
-    echo "starting openvpn on $UPLINK, NAT for $VPN_SUBNET/$VPN_MASK"
-    openvpn --config "$CONFIG_DIR/server.conf" --cd "$CONFIG_DIR" &
-    openvpn_pid=$!
+    openvpn_pid=""
+    if [ -f "$CONFIG_DIR/server.conf" ]; then
+        echo "starting openvpn on $UPLINK, NAT for $VPN_SUBNET/$VPN_MASK"
+        openvpn --config "$CONFIG_DIR/server.conf" --cd "$CONFIG_DIR" &
+        openvpn_pid=$!
+    fi
 
     # A second listener on TCP, for networks that pass the handshake and then
     # drop the UDP flow.
@@ -94,7 +107,7 @@ while true; do
     chmod 0644 /run/openvpn/status.log /run/openvpn/status-tcp.log \
         /run/openvpn/status-transit.log 2>/dev/null || true
 
-    if ! kill -0 "$openvpn_pid" 2>/dev/null; then
+    if [ -n "$openvpn_pid" ] && ! kill -0 "$openvpn_pid" 2>/dev/null; then
         echo "openvpn exited, restarting" >&2
         stop_openvpn
         start_openvpn

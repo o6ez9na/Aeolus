@@ -78,7 +78,7 @@ def _route_line(directive: str, network: str) -> str:
 
 
 def render(
-    grant: ClientNodeGrant,
+    grant: ClientNodeGrant | None,
     common_name: str,
     *,
     proto: str,
@@ -95,11 +95,14 @@ def render(
     if not allowed:
         return f"# {common_name}: доступ к этому узлу не выдан\ndisable\n"
 
+    # Reaching the hub is not the same as being allowed anywhere: what a client
+    # may touch once it is in is decided by the firewall, from its address.
+
     lines = [f"# {common_name} — сгенерировано Aeolus, править вручную бесполезно"]
 
     # The client's own address wins: on the hub every rule about this client is
     # written against it, so the ccd file has to hand out that one and no other.
-    host = tunnel_host if tunnel_host is not None else grant.static_host
+    host = tunnel_host if tunnel_host is not None else (grant.static_host if grant else None)
     if host is not None:
         address = static_address(proto, host)
         # topology subnet: the second argument is the mask, not a peer address.
@@ -116,13 +119,13 @@ def render(
     for network in routes or []:
         lines.append(f'push "{_route_line("route", network)}"')
 
-    for network in grant.push_routes or []:
+    for network in (grant.push_routes if grant else None) or []:
         lines.append(f'push "{_route_line("route", network)}"')
 
-    for network in grant.iroutes or []:
+    for network in (grant.iroutes if grant else None) or []:
         lines.append(_route_line("iroute", network))
 
-    for option in grant.push_options or []:
+    for option in (grant.push_options if grant else None) or []:
         lines.append(f'push "{option}"')
 
     return "\n".join(lines) + "\n"

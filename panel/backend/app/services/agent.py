@@ -368,7 +368,14 @@ async def _build_ccd(session: AsyncSession, node: Node, *, proto: str) -> dict[s
     entries: dict[str, str] = {}
     for client in clients:
         grant = next((g for g in client.grants if g.node_id == node.id), None)
-        allowed = grant is not None and client.status == ClientStatus.active
+        if node.is_hub:
+            # Every client dials the hub — that is the only door there is. Which
+            # nodes it may then use is a routing decision, not a reason to
+            # refuse the connection, and a client with no grants simply reaches
+            # nothing once it is inside.
+            allowed = client.status == ClientStatus.active
+        else:
+            allowed = grant is not None and client.status == ClientStatus.active
 
         default_route = False
         routes: list[str] = []

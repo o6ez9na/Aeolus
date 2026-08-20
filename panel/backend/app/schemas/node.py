@@ -97,6 +97,17 @@ class NodeSummary(BaseModel):
     clients_active: int
 
 
+class ClientGrantRead(BaseModel):
+    """One node a client may use, and on what terms."""
+
+    grant_id: uuid.UUID
+    node_id: uuid.UUID
+    node_name: str
+    node_is_hub: bool
+    node_subnets: list[str] = []
+    is_exit: bool = False
+
+
 class ClientRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -116,6 +127,9 @@ class ClientRead(BaseModel):
     last_node_id: uuid.UUID | None
     created_at: datetime
     node_ids: list[uuid.UUID] = []
+    # Not called `grants`: that name belongs to the ORM relationship, and
+    # validating the model would try to read the rows through it.
+    access: list[ClientGrantRead] = []
 
 
 class ClientCreate(BaseModel):
@@ -124,6 +138,9 @@ class ClientCreate(BaseModel):
     expires_at: datetime | None = None
     traffic_limit_bytes: int | None = Field(default=None, ge=0)
     node_ids: list[uuid.UUID] = []
+    # Not called `grants`: that name belongs to the ORM relationship, and
+    # validating the model would try to read the rows through it.
+    access: list[ClientGrantRead] = []
 
 
 class ClientUpdate(BaseModel):

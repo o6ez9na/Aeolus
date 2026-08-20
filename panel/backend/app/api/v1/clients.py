@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import CurrentUser, OperatorUser, SessionDep
 from app.core.crypto import SecretUnreadableError
 from app.models.node import Client, ClientNodeGrant, Node
-from app.schemas.node import ClientCreate, ClientRead, ClientUpdate
+from app.schemas.node import ClientCreate, ClientGrantRead, ClientRead, ClientUpdate
 from app.services import audit, openvpn, pki, routing
 
 router = APIRouter(prefix="/clients", tags=["clients"])
@@ -18,6 +18,18 @@ router = APIRouter(prefix="/clients", tags=["clients"])
 def _serialize(client: Client) -> ClientRead:
     data = ClientRead.model_validate(client)
     data.node_ids = [grant.node_id for grant in client.grants]
+    data.access = [
+        ClientGrantRead(
+            grant_id=grant.id,
+            node_id=grant.node_id,
+            node_name=grant.node.name,
+            node_is_hub=grant.node.is_hub,
+            node_subnets=grant.node.subnets or [],
+            is_exit=grant.is_exit,
+        )
+        for grant in client.grants
+        if grant.node is not None
+    ]
     if client.tunnel_host is not None:
         data.tunnel_address = openvpn.static_address("udp", client.tunnel_host)
     exit_grant = next((g for g in client.grants if g.is_exit), None)
@@ -27,7 +39,9 @@ def _serialize(client: Client) -> ClientRead:
 
 async def _load(session: SessionDep, client_id: uuid.UUID) -> Client:
     client = await session.scalar(
-        select(Client).where(Client.id == client_id).options(selectinload(Client.grants))
+        select(Client)
+        .where(Client.id == client_id)
+        .options(selectinload(Client.grants).selectinload(ClientNodeGrant.node))
     )
     if client is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Client not found")
@@ -49,7 +63,9 @@ async def _validate_nodes(session: SessionDep, node_ids: list[uuid.UUID]) -> Non
 @router.get("", response_model=list[ClientRead])
 async def list_clients(session: SessionDep, _: CurrentUser) -> list[ClientRead]:
     result = await session.scalars(
-        select(Client).options(selectinload(Client.grants)).order_by(Client.common_name)
+        select(Client)
+        .options(selectinload(Client.grants).selectinload(ClientNodeGrant.node))
+        .order_by(Client.common_name)
     )
     return [_serialize(client) for client in result]
 

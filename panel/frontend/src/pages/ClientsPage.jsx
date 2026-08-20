@@ -4,6 +4,7 @@ import { useOutletContext } from 'react-router-dom'
 import { api, authorizedDownload } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { ConfirmButton } from '../components/ConfirmButton'
+import { AccessPicker } from '../components/AccessPicker'
 import { NodePicker } from '../components/NodePicker'
 import { formatAgo, formatBytes } from '../lib/format'
 import { useResource } from '../lib/useResource'
@@ -15,15 +16,20 @@ const STATUS_DOT = {
   revoked: 'error',
 }
 
-function AccessSummary({ client, nodesById }) {
-  if (client.node_ids.length === 0) {
+function AccessSummary({ client }) {
+  if (client.access.length === 0) {
     return <div className="sub warn">нет доступа к узлам</div>
   }
-  const names = client.node_ids.map((id) => nodesById[id]?.name ?? '—')
-  return <div className="sub">{names.join(' · ')}</div>
+  const exit = client.access.find((g) => g.is_exit)
+  return (
+    <div className="sub">
+      {client.access.map((g) => g.node_name).join(' · ')}
+      {exit && <div className="hl">весь трафик → {exit.node_name}</div>}
+    </div>
+  )
 }
 
-function ClientRow({ client, nodesById, canEdit, expanded, onExpand, onToggle, onDelete }) {
+function ClientRow({ client, canEdit, expanded, onExpand, onToggle, onDelete }) {
   return (
     <div className="row clients">
       <span className={`dot ${STATUS_DOT[client.status] ?? 'unknown'}`} />
@@ -34,8 +40,9 @@ function ClientRow({ client, nodesById, canEdit, expanded, onExpand, onToggle, o
         {client.label && <div className="sub">{client.label}</div>}
       </span>
       <span>
-        <AccessSummary client={client} nodesById={nodesById} />
+        <AccessSummary client={client} />
       </span>
+      <span className="muted">{client.tunnel_address ?? '—'}</span>
       <span className="muted">{client.status}</span>
       <span className="muted">{formatBytes(client.traffic_used_bytes)}</span>
       <span className="muted">
@@ -76,8 +83,9 @@ export function ClientsPage() {
   const [formError, setFormError] = useState(null)
   const [busy, setBusy] = useState(false)
   const [expandedId, setExpandedId] = useState(null)
-  const [draftAccess, setDraftAccess] = useState([])
   const [actionError, setActionError] = useState(null)
+  const [accessError, setAccessError] = useState(null)
+  const [busyNode, setBusyNode] = useState(null)
 
   const canEdit = user?.role === 'admin' || user?.role === 'operator'
   const nodeList = nodes.data ?? []
@@ -105,18 +113,35 @@ export function ClientsPage() {
 
   function handleExpand(clientId) {
     setExpandedId(clientId)
-    const client = (clients.data ?? []).find((c) => c.id === clientId)
-    setDraftAccess(client ? client.node_ids : [])
+    setAccessError(null)
   }
 
-  async function saveAccess(client) {
-    setBusy(true)
+  async function handleToggleNode(client, node, granted) {
+    setBusyNode(node.id)
+    setAccessError(null)
     try {
-      await api.patch(`/clients/${client.id}`, { node_ids: draftAccess })
-      setExpandedId(null)
+      const next = granted
+        ? client.node_ids.filter((id) => id !== node.id)
+        : [...client.node_ids, node.id]
+      await api.patch(`/clients/${client.id}`, { node_ids: next })
       await refreshAll()
+    } catch (err) {
+      setAccessError(err instanceof Error ? err.message : 'Не удалось изменить доступ')
     } finally {
-      setBusy(false)
+      setBusyNode(null)
+    }
+  }
+
+  async function handleSetExit(grant, isExit) {
+    setBusyNode(grant.node_id)
+    setAccessError(null)
+    try {
+      await api.post(`/ccd/${grant.grant_id}/exit`, { is_exit: isExit })
+      await refreshAll()
+    } catch (err) {
+      setAccessError(err instanceof Error ? err.message : 'Не удалось переключить выход')
+    } finally {
+      setBusyNode(null)
     }
   }
 
@@ -144,14 +169,13 @@ export function ClientsPage() {
   if (clients.loading) return <div className="empty">загрузка клиентов…</div>
   if (clients.error) return <div className="empty form-error">{clients.error}</div>
 
-  const nodesById = Object.fromEntries(nodeList.map((node) => [node.id, node]))
-
   return (
     <>
       <div className="row clients head">
         <span />
         <span className="dim">клиент</span>
-        <span className="dim">выход через</span>
+        <span className="dim">доступ</span>
+        <span className="dim">адрес</span>
         <span className="dim">статус</span>
         <span className="dim">трафик</span>
         <span className="dim">истекает</span>
@@ -172,7 +196,6 @@ export function ClientsPage() {
         <div key={client.id}>
           <ClientRow
             client={client}
-            nodesById={nodesById}
             canEdit={canEdit}
             expanded={expandedId === client.id}
             onExpand={handleExpand}
@@ -181,43 +204,42 @@ export function ClientsPage() {
           />
           {expandedId === client.id && (
             <div className="inline-form fade-in">
-              <div className="field" style={{ flex: 1 }}>
-                через какие узлы выпускать {client.common_name}
-                <NodePicker nodes={nodeList} value={draftAccess} onChange={setDraftAccess} />
-              </div>
-              <button className="btn" disabled={busy} onClick={() => saveAccess(client)}>
-                {busy ? 'сохраняю…' : 'сохранить'}
-              </button>
-              <button className="btn ghost" onClick={() => setExpandedId(null)}>
-                отмена
-              </button>
-              {client.cert_serial && client.status !== 'revoked' && (
-                <div className="field" style={{ flexBasis: '100%' }}>
-                  конфигурация клиента
+              <AccessPicker
+                client={client}
+                nodes={nodeList}
+                busy={busyNode}
+                onToggleNode={(node, granted) => handleToggleNode(client, node, granted)}
+                onSetExit={handleSetExit}
+              />
+
+              <div className="field" style={{ flexBasis: '100%' }}>
+                профиль
+                {client.cert_serial && client.status !== 'revoked' ? (
                   <div className="picker">
-                    {client.node_ids.map((nodeId) => (
-                      <button
-                        key={nodeId}
-                        type="button"
-                        className="btn"
-                        onClick={() =>
-                          authorizedDownload(
-                            `/clients/${client.id}/config/${nodeId}`,
-                            `${client.common_name}-${nodesById[nodeId]?.name ?? 'node'}.ovpn`,
-                          )
-                        }
-                      >
-                        скачать .ovpn · {nodesById[nodeId]?.name ?? '—'}
-                      </button>
-                    ))}
+                    <button
+                      className="btn"
+                      onClick={() =>
+                        authorizedDownload(
+                          `/clients/${client.id}/config`,
+                          `${client.common_name}.ovpn`,
+                        )
+                      }
+                    >
+                      скачать .ovpn
+                    </button>
+                    <span className="sub">
+                      один на клиента, ведёт на панель — менять узел выхода можно
+                      без перевыпуска
+                    </span>
                   </div>
-                </div>
-              )}
-              {!client.cert_serial && (
-                <span className="sub warn">
-                  сертификата нет — выпусти его в разделе pki, тогда появится .ovpn
-                </span>
-              )}
+                ) : (
+                  <span className="sub warn">
+                    сертификата нет — выпусти его в разделе pki, тогда появится .ovpn
+                  </span>
+                )}
+              </div>
+
+              {accessError && <span className="form-error">{accessError}</span>}
             </div>
           )}
         </div>

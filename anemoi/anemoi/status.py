@@ -31,6 +31,11 @@ def read(path: Path) -> Snapshot:
     except OSError as exc:
         return Snapshot(running=False, message=f"не читается status.log: {exc}")
 
+    # A client-mode instance — which is what a node runs for the transit tunnel —
+    # writes a different, much shorter file: counters and no client list.
+    if lines and lines[0].startswith("OpenVPN STATISTICS"):
+        return _read_client_stats(lines)
+
     sessions: list[dict] = []
     routes: dict[str, str] = {}
     section = ""
@@ -73,6 +78,24 @@ def read(path: Path) -> Snapshot:
         tx_bytes=tx,
         bandwidth_mbps=_throughput_mbps(rx, tx),
         sessions=sessions,
+    )
+
+
+def _read_client_stats(lines: list[str]) -> Snapshot:
+    """Counters from a client-mode status file. No sessions to report there."""
+    counters: dict[str, int] = {}
+    for line in lines:
+        name, _, value = line.partition(",")
+        if value.strip().isdigit():
+            counters[name.strip()] = int(value)
+
+    rx = counters.get("TCP/UDP read bytes", 0)
+    tx = counters.get("TCP/UDP write bytes", 0)
+    return Snapshot(
+        running=True,
+        rx_bytes=rx,
+        tx_bytes=tx,
+        bandwidth_mbps=_throughput_mbps(rx, tx),
     )
 
 

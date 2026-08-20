@@ -59,6 +59,11 @@ class Config:
     status_file: Path = Path(
         os.environ.get("ANEMOI_STATUS_FILE", "/run/openvpn/status.log")
     )
+    # A node runs no client listener, so it has no status.log — what says it is
+    # healthy there is the transit tunnel to the hub.
+    transit_status_file: Path = Path(
+        os.environ.get("ANEMOI_TRANSIT_STATUS_FILE", "/run/openvpn/status-transit.log")
+    )
     interval: int = int(os.environ.get("ANEMOI_INTERVAL", "15"))
     # Written when server.conf changes so the OpenVPN supervisor can restart it.
     restart_flag: Path = field(default_factory=lambda: Path(
@@ -415,7 +420,13 @@ def run() -> None:
                     revision = config.revision
                     logger.info("applied configuration revision %s", revision)
 
-                snapshot = status_parser.read(cfg.status_file)
+                # Whichever OpenVPN this machine actually runs: the hub serves
+                # clients, every other node only holds the transit tunnel.
+                snapshot = status_parser.read(
+                    cfg.status_file
+                    if cfg.status_file.exists()
+                    else cfg.transit_status_file
+                )
                 stub.ReportStatus(
                     agent_pb2.StatusReport(
                         openvpn_running=snapshot.running,

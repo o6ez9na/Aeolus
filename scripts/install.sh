@@ -62,6 +62,12 @@ t_en() {
     net_dns_written)  echo "wrote %s and restarted docker";;
     net_daemon_exists) echo "%s already exists; leaving it alone";;
     net_manual)       echo "still no way out from a container. Fix DNS for docker, then run this script again. Usual causes: the provider's resolver, or a host with IPv6 that containers cannot use. Try: echo '{\"dns\":[\"1.1.1.1\",\"8.8.8.8\"]}' > /etc/docker/daemon.json && systemctl restart docker";;
+    net_host_forced)  echo "host networking requested, skipping the bridge check";;
+    net_dns_fail)     echo "containers cannot resolve dl-cdn.alpinelinux.org";;
+    net_route_fail)   echo "containers resolve the mirror but cannot reach it";;
+    net_host_ok)      echo "the host itself reaches it fine, so the problem is the docker bridge — building in the host namespace instead. Usual causes: a firewall dropping forwarded packets, docker started with iptables management off, or a bridge MTU larger than the uplink.";;
+    hostnet_node)     echo "this node will also RUN in the host namespace: its agent has to dial the panel, and the bridge cannot. OpenVPN will bind the host's interfaces and its NAT rules will be the host's.";;
+    node_over_panel)  echo "%s already holds a panel installation. Installing a node on top of it would share the same containers and volumes and break both. Use a different machine, or set INSTALL_DIR to another directory.";;
     tun_create)       echo "creating /dev/net/tun";;
     tun_fail)         echo "cannot create /dev/net/tun — in an LXC container, bind-mount it from the host";;
     tree_refresh)     echo "refreshing %s";;
@@ -125,6 +131,12 @@ t_ru() {
     net_dns_written)  echo "записал %s и перезапустил docker";;
     net_daemon_exists) echo "%s уже существует, не трогаю его";;
     net_manual)       echo "из контейнера всё равно нет выхода. Почини DNS для docker и запусти скрипт снова. Обычные причины: резолвер провайдера или IPv6 на хосте, недоступный контейнерам. Попробуй: echo '{\"dns\":[\"1.1.1.1\",\"8.8.8.8\"]}' > /etc/docker/daemon.json && systemctl restart docker";;
+    net_host_forced)  echo "host-сеть запрошена явно, проверку бриджа пропускаю";;
+    net_dns_fail)     echo "контейнеры не резолвят dl-cdn.alpinelinux.org";;
+    net_route_fail)   echo "контейнеры резолвят зеркало, но не достают до него";;
+    net_host_ok)      echo "с самого хоста всё достаётся, значит дело в docker-бридже — собираю в host-namespace. Обычные причины: фаервол режет форвард, docker запущен без управления iptables, или MTU бриджа больше, чем у аплинка.";;
+    hostnet_node)     echo "узел и работать будет в host-namespace: его агент обязан дозвониться до панели, а через бридж это не выходит. OpenVPN займёт интерфейсы хоста, и правила NAT будут хостовыми.";;
+    node_over_panel)  echo "в %s уже стоит панель. Узел поверх неё будет делить те же контейнеры и тома и сломает обоих. Возьми другую машину или задай INSTALL_DIR с другим каталогом.";;
     tun_create)       echo "создаю /dev/net/tun";;
     tun_fail)         echo "не могу создать /dev/net/tun — в LXC-контейнере пробрось его с хоста";;
     tree_refresh)     echo "обновляю %s";;
@@ -260,21 +272,59 @@ install_docker() {
   ok "$(t docker_ready)"
 }
 
-container_can_fetch() {
-  # Exactly what the image build does, and the step that fails on a box where
-  # docker has no usable DNS: pull the Alpine index.
-  docker run --rm --pull always alpine:3.22 \
-    sh -c 'apk update >/dev/null 2>&1' >/dev/null 2>&1
+# Set when containers on the default bridge cannot reach the internet but the
+# host can. Builds then run in the host namespace, and a node runs there too —
+# an agent that cannot dial the panel is no more use than a build that cannot
+# fetch packages.
+# AEOLUS_HOST_NETWORK=1 forces it: a machine that already routes for other
+# services is often easier to reason about with the VPN in the host namespace.
+USE_HOST_NETWORK="${AEOLUS_HOST_NETWORK:-}"
+
+INDEX_URL="https://dl-cdn.alpinelinux.org/alpine/v3.22/main/x86_64/APKINDEX.tar.gz"
+
+probe() { # probe <docker run args...> — resolve, then fetch, reporting which failed
+  docker run --rm "$@" alpine:3.22 sh -c "
+    getent hosts dl-cdn.alpinelinux.org >/dev/null 2>&1 || exit 10
+    wget -q -T 15 -O /dev/null '$INDEX_URL' >/dev/null 2>&1 || exit 20
+  " >/dev/null 2>&1
 }
 
 ensure_docker_network() {
+  if [ -n "$USE_HOST_NETWORK" ]; then
+    warn "$(t net_host_forced)"
+    return 0
+  fi
   info "$(t net_check)"
-  if container_can_fetch; then
+
+  # Pulling happens in the daemon's namespace, so a working pull says nothing
+  # about whether a container can reach anything. Pull once, then test properly.
+  docker pull -q alpine:3.22 >/dev/null 2>&1 || true
+
+  # `probe; code=$?` would abort under set -e, and reading $? after an && chain
+  # gives the chain's status rather than the probe's.
+  local bridge_code=0
+  probe || bridge_code=$?
+  if [ "$bridge_code" -eq 0 ]; then
     ok "$(t net_ok)"
     return 0
   fi
 
-  warn "$(t net_broken)"
+  case "$bridge_code" in
+    10) warn "$(t net_dns_fail)" ;;
+    20) warn "$(t net_route_fail)" ;;
+    *)  warn "$(t net_broken)" ;;
+  esac
+
+  # Does the host itself have a way out? If it does, the bridge is the problem —
+  # a firewall dropping forwarded packets, docker started with iptables off, or
+  # an MTU larger than the uplink can carry.
+  if probe --network host; then
+    warn "$(t net_host_ok)"
+    USE_HOST_NETWORK=1
+    return 0
+  fi
+
+  # Same symptom in both namespaces: this is name resolution or the uplink.
   local daemon=/etc/docker/daemon.json
   if [ -s "$daemon" ]; then
     # Merging someone else's daemon.json blind is how a working docker gets
@@ -287,10 +337,7 @@ ensure_docker_network() {
     systemctl restart docker || true
     sleep 3
     ok "$(t net_dns_written "$daemon")"
-    if container_can_fetch; then
-      ok "$(t net_ok)"
-      return 0
-    fi
+    probe && { ok "$(t net_ok)"; return 0; }
   fi
 
   die "$(t net_manual)"
@@ -375,8 +422,11 @@ env_default() { # env_default <file> <key> <value> — only when unset or empty
   [ -n "$(env_get "$1" "$2")" ] || env_set "$1" "$2" "$3"
 }
 
+# Both of these only produce a suggestion, so neither may fail: an unknown
+# interface makes `ip` exit non-zero, and under `set -e` that would abort the
+# install in the middle of a question.
 detect_wan_iface() {
-  ip -4 route show default 2>/dev/null | awk '{print $5; exit}'
+  ip -4 route show default 2>/dev/null | awk '{print $5; exit}' || true
 }
 
 detect_lan_subnet() {
@@ -384,7 +434,7 @@ detect_lan_subnet() {
   # not /24 — deriving it from the address by hand gets those wrong.
   local iface="$1"
   [ -n "$iface" ] || return 0
-  ip -4 route show dev "$iface" scope link 2>/dev/null | awk '{print $1; exit}'
+  ip -4 route show dev "$iface" scope link 2>/dev/null | awk '{print $1; exit}' || true
 }
 
 # --- panel -----------------------------------------------------------------
@@ -422,7 +472,9 @@ install_panel() {
   chmod 600 "$env_file"
 
   info "$(t build_panel)"
-  compose_up -f docker-compose.yml -f docker-compose.prod.yml
+  local files=(-f docker-compose.yml -f docker-compose.prod.yml)
+  [ -n "$USE_HOST_NETWORK" ] && files+=(-f docker-compose.hostnet.yml)
+  compose_up "${files[@]}"
 
   ok "$(t panel_up "$domain")"
   echo
@@ -441,6 +493,9 @@ install_panel() {
 }
 
 # --- node ------------------------------------------------------------------
+# Read by print_fingerprint too, so it stays global.
+NODE_FILES=(-f docker-compose.node.yml)
+
 install_node() {
   local env_file="$INSTALL_DIR/.env"
   local domain="" name="" subnets="" wan="" guess_subnet=""
@@ -449,6 +504,12 @@ install_node() {
   if [ -z "$domain" ]; then
     ask "$(t ask_panel_domain)" domain
     [ -n "$domain" ] || die "$(t panel_required)"
+  fi
+
+  # A panel and a node in one directory would share a compose project name,
+  # and the node's containers would quietly replace the panel's.
+  if [ -n "$(env_get "$env_file" AEOLUS_PKI_SECRET)" ] && [ -z "${FORCE_NODE_OVER_PANEL:-}" ]; then
+    die "$(t node_over_panel "$INSTALL_DIR")"
   fi
 
   name="${AEOLUS_NODE_NAME:-$(env_get "$env_file" AEOLUS_NODE_NAME)}"
@@ -475,7 +536,12 @@ install_node() {
   chmod 600 "$env_file"
 
   info "$(t build_node)"
-  compose_up -f docker-compose.node.yml
+  NODE_FILES=(-f docker-compose.node.yml)
+  if [ -n "$USE_HOST_NETWORK" ]; then
+    warn "$(t hostnet_node)"
+    NODE_FILES+=(-f docker-compose.node.host.yml)
+  fi
+  compose_up "${NODE_FILES[@]}"
 
   ok "$(t node_up "$domain")"
   echo
@@ -486,14 +552,14 @@ install_node() {
   t accept_hint3
   echo
   t logs_hint
-  echo "  cd $INSTALL_DIR && docker compose -f docker-compose.node.yml logs -f anemoi"
+  echo "  cd $INSTALL_DIR && docker compose ${NODE_FILES[*]} logs -f anemoi"
 }
 
 print_fingerprint() {
   local line="" tries=0
   info "$(t fp_wait)"
   while [ "$tries" -lt 30 ]; do
-    line="$(cd "$INSTALL_DIR" && docker compose -f docker-compose.node.yml logs anemoi 2>/dev/null \
+    line="$(cd "$INSTALL_DIR" && docker compose "${NODE_FILES[@]}" logs anemoi 2>/dev/null \
       | grep -A1 'fingerprint must read' | tail -1 | tr -d '\r' | awk '{print $NF}')"
     case "$line" in
       *:*:*) t fp_line "$(c '1;32' "$line")"; return 0 ;;
@@ -502,7 +568,7 @@ print_fingerprint() {
     sleep 2
   done
   warn "$(t fp_fail)"
-  echo "  cd $INSTALL_DIR && docker compose -f docker-compose.node.yml logs anemoi | grep -A1 fingerprint"
+  echo "  cd $INSTALL_DIR && docker compose ${NODE_FILES[*]} logs anemoi | grep -A1 fingerprint"
 }
 
 # --- run -------------------------------------------------------------------

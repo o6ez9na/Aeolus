@@ -1,0 +1,28 @@
+# Build in the host's network namespace.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.hostnet.yml up -d --build
+#
+# Panel only — a node gets the same treatment from docker-compose.node.host.yml,
+# which also moves it into the host namespace at runtime.
+#
+# For hosts where containers on the default bridge cannot reach the internet
+# while the host itself can: a firewall dropping forwarded packets, docker
+# started with iptables management off, or a bridge MTU larger than the uplink.
+# The image build then fails fetching package indexes and reports every package
+# as missing, which reads like a packaging problem rather than a network one.
+#
+# This only changes where the *build* runs. Container networking at runtime is
+# untouched.
+services:
+  backend:
+    build:
+      network: host
+  frontend:
+    build:
+      network: host
+  openvpn:
+    build:
+      network: host
+  anemoi:
+    build:
+      network: host

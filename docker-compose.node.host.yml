@@ -1,0 +1,32 @@
+# A node that lives in the host's network namespace.
+#
+#   docker compose -f docker-compose.node.yml -f docker-compose.node.host.yml up -d --build
+#
+# Use this when the docker bridge has no way out — the agent has to dial the
+# panel, so a node whose containers cannot reach the internet is dead on
+# arrival. It is also the simpler shape for an exit node: OpenVPN binds the
+# host's interfaces directly and its NAT rules land in the host's tables, with
+# no second translation between the container and the machine.
+#
+# The trade-off is that those iptables rules are now the host's, on a machine
+# that may be running other things. They are added with -C first, so they are
+# not duplicated, but they are not confined to a container either.
+#
+# The build runs in the host namespace too: the same broken bridge is what makes
+# `apk` fail to fetch its index and report every package as missing.
+services:
+  openvpn:
+    build:
+      context: ./deploy/openvpn
+      network: host
+    network_mode: host
+    # Published ports are meaningless in the host namespace, and compose refuses
+    # to combine the two.
+    ports: !reset []
+
+  anemoi:
+    build:
+      context: .
+      dockerfile: anemoi/Dockerfile
+      network: host
+    network_mode: host

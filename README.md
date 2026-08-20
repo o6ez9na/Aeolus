@@ -80,6 +80,23 @@ systemctl restart docker
 The image build also retries and falls back to other mirrors on its own, since
 these failures are often just a bad minute at the CDN.
 
+If the host reaches the mirrors but containers do not, the problem is the docker
+bridge rather than DNS — a firewall dropping forwarded packets, docker started
+with `"iptables": false`, or a bridge MTU larger than the uplink. Note that
+`docker pull` succeeding proves nothing here: pulls happen in the daemon's own
+namespace. The installer detects this and moves the build into the host
+namespace; for a node it moves the containers there too, since an agent that
+cannot dial the panel is no more use than a build that cannot fetch packages.
+Force it with `AEOLUS_HOST_NETWORK=1`, or by hand:
+
+```sh
+docker compose -f docker-compose.node.yml -f docker-compose.node.host.yml up -d --build
+```
+
+A node in the host namespace binds the host's interfaces directly and installs
+its NAT rules in the host's tables — simpler for an exit node, but no longer
+confined to a container.
+
 ## Run it by hand
 
 ```sh

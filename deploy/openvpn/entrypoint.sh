@@ -7,6 +7,13 @@ VPN_TCP_SUBNET=${AEOLUS_VPN_TCP_SUBNET:-10.9.0.0}
 VPN_MASK=${AEOLUS_VPN_MASK_BITS:-24}
 RESTART_FLAG="$CONFIG_DIR/.restart"
 
+# The agent writes this directory and runs as an unprivileged user, while this
+# container is the one that creates it. On the panel the backend gets there
+# first with the same uid; on a node nobody else would, so hand it over here.
+AGENT_UID=${AEOLUS_AGENT_UID:-10001}
+mkdir -p "$CONFIG_DIR"
+chown "$AGENT_UID:$AGENT_UID" "$CONFIG_DIR" 2>/dev/null || true
+
 # The hub gets server.conf (the listener clients dial); every other node gets
 # only transit.conf (the tunnel it dials to the hub). Wait for whichever this
 # machine is meant to run.

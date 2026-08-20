@@ -327,6 +327,11 @@ def apply_config(cfg: Config, response) -> bool:
             files["transit.key"] = state.key_path.read_text()
 
     for name, content in files.items():
+        # An empty payload means "this node does not run that", not "write an
+        # empty file": an empty server.conf would still be started by the
+        # supervisor. The loop above has already removed a file that went away.
+        if not content:
+            continue
         path = cfg.config_dir / name
         if path.exists() and path.read_text() == content:
             continue

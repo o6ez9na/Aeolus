@@ -121,6 +121,7 @@ async def announce(
             key_fingerprint=fingerprint,
             approval=NodeApproval.pending,
             role=NodeRole.slave,
+            transit_obfuscated=settings.transit_obfuscated_default,
         )
         session.add(node)
         logger.warning("Node %r announced itself from %s", node.name, source_ip)

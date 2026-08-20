@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     # Name of the wstunnel container a node runs beside OpenVPN, as its own
     # compose network resolves it.
     transit_wstunnel_host: str = "wstunnel"
+    # New nodes carry the transit inside a WebSocket from the start. A node that
+    # cannot hold a tunnel is useless, and the networks that break one do it
+    # silently — a working node an operator can speed up beats a dead node they
+    # have to diagnose. Turned off per node once it is known to be unnecessary.
+    transit_obfuscated_default: bool = True
 
     vpn_dns: str = "1.1.1.1"
     # Fixed addresses are handed out below the dynamic pool, so a pinned client

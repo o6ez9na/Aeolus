@@ -9,6 +9,8 @@ import logging
 import time
 from pathlib import Path
 
+from sqlalchemy import select
+
 from app.core.config import settings
 from app.core.crypto import decrypt_secret
 from app.models.node import Client, Node
@@ -336,6 +338,15 @@ verb 3
 {tls_crypt.strip()}
 </tls-crypt>
 """
+
+
+async def build_client_profile(session, client: Client) -> tuple[Node, str]:
+    """The client's .ovpn and the hub it points at, however it is handed out."""
+    node = await session.scalar(select(Node).where(Node.is_hub.is_(True)))
+    if node is None:
+        raise OpenVpnError("панель ещё не зарегистрировала себя как узел")
+    ca = await pki.require_ca(session)
+    return node, render_client_config(client, node, ca)
 
 
 async def sync_local_crl(session) -> bool:

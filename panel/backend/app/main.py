@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api import profile_import
 from app.api.v1 import api_router
 from app.core.config import settings
 from app.core.db import SessionLocal, engine
@@ -60,6 +61,8 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix=settings.api_prefix)
+# Outside the API prefix: OpenVPN Connect asks for these paths verbatim.
+app.include_router(profile_import.router)
 
 
 @app.get("/health", tags=["meta"])

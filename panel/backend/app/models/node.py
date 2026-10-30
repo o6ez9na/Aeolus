@@ -236,6 +236,12 @@ class Client(Base, UUIDMixin, TimestampMixin):
     cert_not_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Lets the subscriber pull the profile into OpenVPN Connect with the panel's
+    # address, the common name and this password. NULL means import is off. The
+    # profile it unlocks carries the private key, so this guards the same thing
+    # the downloaded file does.
+    import_password_hash: Mapped[str | None] = mapped_column(String(255))
+
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )

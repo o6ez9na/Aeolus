@@ -170,6 +170,17 @@ export function MeshProvider({ children }) {
         authorizedDownload(`/clients/${client.id}/config`, `${client.common_name}.ovpn`).catch(
           (err) => toast.error(err),
         ),
+      /** Resolves to { username, password }: the only time the password is visible. */
+      issueImportPassword: (client) =>
+        run(
+          () => api.post(`/clients/${client.id}/import-password`),
+          `${client.common_name}: пароль для OpenVPN Connect выдан`,
+        ),
+      disableImport: (client) =>
+        run(
+          () => api.delete(`/clients/${client.id}/import-password`),
+          `${client.common_name}: вход по паролю выключен`,
+        ),
       updateNode: (node, body, message) => run(() => api.patch(`/nodes/${node.id}`, body), message),
       approveNode: (node) =>
         run(

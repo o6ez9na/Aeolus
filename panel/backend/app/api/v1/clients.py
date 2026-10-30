@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, OperatorUser, SessionDep
 from app.core.crypto import SecretUnreadableError
+from app.core.security import generate_password, hash_password
 from app.models.node import (
     Client,
     ClientGroup,
@@ -19,6 +20,8 @@ from app.models.node import (
 from app.schemas.node import (
     ClientCreate,
     ClientGrantRead,
+    ClientImportCredentials,
+    ClientImportPassword,
     ClientRead,
     ClientSessionRead,
     ClientUpdate,
@@ -55,6 +58,7 @@ def _serialize(client: Client, sessions: dict[str, dict] | None = None) -> Clien
         data.tunnel_address = openvpn.static_address("udp", client.tunnel_host)
     exit_grant = next((g for g in client.grants if g.is_exit), None)
     data.exit_node_id = exit_grant.node_id if exit_grant else None
+    data.import_enabled = client.import_password_hash is not None
     return data
 
 
@@ -264,16 +268,8 @@ async def download_client_config(
     """
     client = await _load(session, client_id)
 
-    node = await session.scalar(select(Node).where(Node.is_hub.is_(True)))
-    if node is None:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "панель ещё не зарегистрировала себя как узел",
-        )
-
     try:
-        ca = await pki.require_ca(session)
-        config = openvpn.render_client_config(client, node, ca)
+        node, config = await openvpn.build_client_profile(session, client)
     except (openvpn.OpenVpnError, pki.PkiError) as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
     except SecretUnreadableError as exc:
@@ -293,6 +289,58 @@ async def download_client_config(
     )
     await session.commit()
     return config
+
+
+@router.post("/{client_id}/import-password", response_model=ClientImportCredentials)
+async def set_import_password(
+    client_id: uuid.UUID,
+    body: ClientImportPassword,
+    request: Request,
+    session: SessionDep,
+    user: OperatorUser,
+) -> ClientImportCredentials:
+    """Let the subscriber import the profile into OpenVPN Connect by password.
+
+    Setting a new one replaces the old, so this is also how a leaked password
+    is changed. The password is shown once; only its hash is stored.
+    """
+    client = await _load(session, client_id)
+    if client.cert_pem is None or client.revoked_at is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "у клиента нет действующего сертификата, профиль не собрать"
+        )
+    password = body.password or generate_password()
+    client.import_password_hash = hash_password(password)
+    await audit.record(
+        session,
+        "client.import_enabled",
+        actor=user,
+        request=request,
+        target_type="client",
+        target_id=client.id,
+        target_label=client.common_name,
+        detail={"generated": body.password is None},
+    )
+    await session.commit()
+    return ClientImportCredentials(username=client.common_name, password=password)
+
+
+@router.delete("/{client_id}/import-password", status_code=status.HTTP_204_NO_CONTENT)
+async def disable_import(
+    client_id: uuid.UUID, request: Request, session: SessionDep, user: OperatorUser
+) -> None:
+    client = await _load(session, client_id)
+    client.import_password_hash = None
+    await audit.record(
+        session,
+        "client.import_disabled",
+        actor=user,
+        request=request,
+        target_type="client",
+        target_id=client.id,
+        target_label=client.common_name,
+    )
+    await session.commit()
 
 
 @router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT)

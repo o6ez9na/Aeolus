@@ -58,6 +58,86 @@ function CcdPreview({ client }) {
 }
 
 /**
+ * Setting a client up from OpenVPN Connect itself: the person types the
+ * panel's address, their name and a password, and the app fetches the profile.
+ */
+function ProfileImport({ client, editable }) {
+  const mesh = useMesh()
+  const [busy, setBusy] = useState(false)
+  // Only ever held right after issuing: the panel keeps a hash, not the password.
+  const [issued, setIssued] = useState(null)
+  const host = window.location.host
+
+  async function act(fn) {
+    setBusy(true)
+    try {
+      await fn()
+    } catch {
+      // reported by the mesh
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const issue = () => act(async () => setIssued(await mesh.issueImportPassword(client)))
+  const handout = issued && `Адрес: ${host}\nЛогин: ${issued.username}\nПароль: ${issued.password}`
+
+  return (
+    <div className="stack" style={{ gap: 8 }}>
+      <span className="lbl">Вход в OpenVPN Connect</span>
+      {issued ? (
+        <>
+          <pre className="code wrap" style={{ fontSize: 12.5 }}>
+            {handout}
+          </pre>
+          <div className="row-wrap">
+            <button
+              className="btn sm"
+              type="button"
+              onClick={() => void navigator.clipboard?.writeText(handout)}
+            >
+              <Icon name="copy" size={14} />
+              Скопировать
+            </button>
+            <button className="btn sm ghost" type="button" onClick={() => setIssued(null)}>
+              Готово
+            </button>
+          </div>
+          <span className="hint warn-text">Пароль виден только сейчас: панель хранит лишь его хеш.</span>
+        </>
+      ) : client.import_enabled ? (
+        <span className="hint">
+          Включён: логин <span className="mono">{client.common_name}</span>, адрес{' '}
+          <span className="mono">{host}</span>.
+        </span>
+      ) : (
+        <span className="hint">
+          В приложении: импорт профиля → URL → {host}, логин и пароль. Профиль подтянется сам, с
+          ключом внутри, поэтому пароль даёт тот же доступ, что и файл.
+        </span>
+      )}
+      {editable && !issued && (
+        <div className="row-wrap">
+          <button className="btn sm" type="button" disabled={busy} onClick={() => void issue()}>
+            {client.import_enabled ? 'Новый пароль' : 'Выдать пароль'}
+          </button>
+          {client.import_enabled && (
+            <button
+              className="btn sm ghost"
+              type="button"
+              disabled={busy}
+              onClick={() => void act(() => mesh.disableImport(client))}
+            >
+              Выключить
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
  * Everything about one client in one column: where it may go, where its
  * internet leaves, its profile. The same component sits beside the map and in
  * the client table's drawer, so both places behave the same way.
@@ -396,6 +476,7 @@ export function ClientInspector({ client }) {
               Профиль один и ведёт на панель: доступ и выход меняются без перевыпуска.
               {certDays !== null && ` Сертификат действует до ${formatDate(client.cert_not_after)}.`}
             </span>
+            <ProfileImport key={client.id} client={client} editable={editable} />
           </>
         ) : client.status === 'revoked' ? (
           <div className="callout err">Сертификат отозван: профиль больше не подключится.</div>

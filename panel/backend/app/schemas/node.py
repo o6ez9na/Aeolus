@@ -200,6 +200,21 @@ class ClientRead(BaseModel):
     session: ClientSessionRead | None = None
     group_id: uuid.UUID | None = None
     group_name: str | None = None
+    # Whether the profile can be pulled into OpenVPN Connect with a password.
+    import_enabled: bool = False
+
+
+class ClientImportPassword(BaseModel):
+    """Omit the password to have the panel generate one."""
+
+    password: str | None = Field(default=None, min_length=8, max_length=128)
+
+
+class ClientImportCredentials(BaseModel):
+    """Returned once: the panel keeps only a hash of the password."""
+
+    username: str
+    password: str
 
 
 class ClientCreate(BaseModel):

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { useAuth } from '../auth/AuthContext'
+import { PageHead } from '../components/AppShell'
+import { formatStamp } from '../lib/format'
 import { useResource } from '../lib/useResource'
 
 const PAGE_SIZE = 50
@@ -18,18 +20,27 @@ const ACTION_LABEL = {
   'node.create': 'создан узел',
   'node.update': 'изменён узел',
   'node.delete': 'удалён узел',
+  'node.approve': 'узел принят',
+  'node.reject': 'узел отклонён',
   'node.enrollment_token': 'выдан токен узла',
   'client.create': 'создан клиент',
   'client.update': 'изменён клиент',
   'client.delete': 'удалён клиент',
   'client.delete_refused': 'удаление отклонено',
   'client.config_download': 'скачан профиль',
+  'ccd.update': 'изменён ccd',
+  'ccd.exit': 'изменён выход',
   'pki.init_ca': 'создан CA',
   'pki.issue_client_cert': 'выпущен клиентский сертификат',
   'pki.revoke_client_cert': 'отозван сертификат',
   'pki.issue_server_cert': 'выпущен серверный сертификат',
   'agent.enroll': 'агент зарегистрирован',
   'agent.enroll_rejected': 'регистрация агента отклонена',
+  'ui.groups': 'изменены группы',
+  'group.create': 'создана группа',
+  'group.update': 'переименована группа',
+  'group.grants': 'изменены доступы группы',
+  'group.delete': 'удалена группа',
 }
 
 // Events that mean something went wrong or something disappeared. They carry
@@ -40,33 +51,32 @@ const LOUD = new Set([
   'client.delete',
   'client.delete_refused',
   'node.delete',
+  'node.reject',
+  'group.delete',
   'user.delete',
   'pki.revoke_client_cert',
   'agent.enroll_rejected',
 ])
 
 const FAMILIES = [
-  ['', 'все действия'],
-  ['auth', 'вход и сессии'],
-  ['client', 'клиенты'],
-  ['node', 'узлы'],
-  ['pki', 'сертификаты'],
-  ['user', 'пользователи'],
-  ['agent', 'агенты'],
+  ['', 'Все'],
+  ['auth', 'Вход'],
+  ['client', 'Клиенты'],
+  ['node', 'Узлы'],
+  ['ccd', 'Доступ'],
+  ['group', 'Группы'],
+  ['pki', 'Сертификаты'],
+  ['user', 'Пользователи'],
+  ['agent', 'Агенты'],
 ]
 
-function formatStamp(iso) {
-  const date = new Date(iso)
-  return `${date.toLocaleDateString('ru-RU')} ${date.toLocaleTimeString('ru-RU')}`
-}
-
 function Detail({ event }) {
-  if (!event.detail || Object.keys(event.detail).length === 0) return <span className="sub">—</span>
+  if (!event.detail || Object.keys(event.detail).length === 0) return <span className="dim">—</span>
   const text = Object.entries(event.detail)
-    .map(([key, value]) => `${key}=${Array.isArray(value) ? value.length : value}`)
+    .map(([key, value]) => `${key}=${Array.isArray(value) ? value.length : typeof value === 'object' && value !== null ? '…' : value}`)
     .join(' · ')
   return (
-    <span className="sub" title={JSON.stringify(event.detail, null, 2)}>
+    <span className="hint mono" title={JSON.stringify(event.detail, null, 2)}>
       {text}
     </span>
   )
@@ -100,18 +110,16 @@ export function AuditPage() {
 
   if (!isAdmin) {
     return (
-      <div className="empty">
-        <div className="name">журнал доступен только админу</div>
-        <p className="sub" style={{ margin: '8px 0 0' }}>
-          В нём видно, кто и с какого адреса что делал, поэтому читать его может
-          только администратор.
-        </p>
-      </div>
+      <>
+        <PageHead title="Аудит" />
+        <div className="panel empty-state">
+          <h3>Журнал доступен только админу</h3>
+          <span>В нём видно, кто и с какого адреса что делал.</span>
+        </div>
+      </>
     )
   }
 
-  // The filters stay mounted while a request is in flight: re-rendering them
-  // would take the focus out of the input mid-typing.
   const items = log.data?.items ?? []
   const total = log.data?.total ?? 0
   const from = total === 0 ? 0 : offset + 1
@@ -119,78 +127,94 @@ export function AuditPage() {
 
   return (
     <>
-      <div className="audit-filters">
-        <select
-          value={family}
-          aria-label="фильтр по разделу"
-          onChange={(event) => {
-            setFamily(event.target.value)
-            setOffset(0)
-          }}
-        >
+      <PageHead title="Аудит" sub="Каждое изменение пишется в той же транзакции, что и само изменение." />
+      <section className="panel" style={{ overflow: 'hidden' }}>
+        <div className="toolbar">
           {FAMILIES.map(([value, label]) => (
-            <option key={value} value={value}>
+            <button
+              key={value || 'all'}
+              type="button"
+              className={`seg${family === value ? ' on' : ''}`}
+              aria-pressed={family === value}
+              onClick={() => {
+                setFamily(value)
+                setOffset(0)
+              }}
+            >
               {label}
-            </option>
+            </button>
           ))}
-        </select>
-
-        <input
-          placeholder="кто (логин)"
-          aria-label="фильтр по логину"
-          value={actor}
-          onChange={(event) => setActor(event.target.value)}
-        />
-
-        <span className="sub">
-          {total === 0 ? 'записей нет' : `${from}–${to} из ${total}`}
-        </span>
-
-        <span className="audit-pager">
-          <button className="btn" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
-            новее
+          <span className="spacer" />
+          <input
+            className="input"
+            style={{ width: 180, height: 32 }}
+            placeholder="Кто (логин)"
+            aria-label="Фильтр по логину"
+            value={actor}
+            onChange={(event) => setActor(event.target.value)}
+          />
+          <span className="hint">{total === 0 ? 'записей нет' : `${from}–${to} из ${total}`}</span>
+          <button
+            className="btn sm"
+            type="button"
+            disabled={offset === 0}
+            onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+          >
+            Новее
           </button>
-          <button className="btn" disabled={to >= total} onClick={() => setOffset(offset + PAGE_SIZE)}>
-            старее
+          <button className="btn sm" type="button" disabled={to >= total} onClick={() => setOffset(offset + PAGE_SIZE)}>
+            Старее
           </button>
-        </span>
-      </div>
-
-      <div className="row audit head">
-        <span className="dim">когда</span>
-        <span className="dim">кто</span>
-        <span className="dim">действие</span>
-        <span className="dim">объект</span>
-        <span className="dim">детали</span>
-        <span className="dim">адрес</span>
-      </div>
-
-      {log.error && <div className="empty form-error">{log.error}</div>}
-
-      {!log.error && items.length === 0 && (
-        <div className="empty">
-          {log.loading ? 'загрузка журнала…' : 'под фильтр ничего не попало.'}
         </div>
-      )}
-
-      {items.map((event) => (
-        <div className="row audit" key={event.id}>
-          <span className="muted">{formatStamp(event.created_at)}</span>
-          <span>
-            <span className="name">{event.actor_username ?? 'система'}</span>
-            {event.actor_role && <div className="sub">{event.actor_role}</div>}
-          </span>
-          <span className={LOUD.has(event.action) ? 'sub err' : 'muted'} title={event.action}>
-            {ACTION_LABEL[event.action] ?? event.action}
-          </span>
-          <span>
-            <span className="name">{event.target_label ?? '—'}</span>
-            {event.target_type && <div className="sub">{event.target_type}</div>}
-          </span>
-          <Detail event={event} />
-          <span className="sub">{event.actor_ip ?? '—'}</span>
+        {log.error && <div className="notice err">{log.error}</div>}
+        <div className="table-wrap">
+          <table className="table" style={{ minWidth: 860 }}>
+            <thead>
+              <tr>
+                <th>Когда</th>
+                <th>Кто</th>
+                <th>Действие</th>
+                <th>Объект</th>
+                <th>Детали</th>
+                <th>Адрес</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!log.error && items.length === 0 && (
+                <tr>
+                  <td colSpan={6}>
+                    <div className="empty-state">{log.loading ? 'загрузка журнала…' : 'Под фильтр ничего не попало'}</div>
+                  </td>
+                </tr>
+              )}
+              {items.map((event) => (
+                <tr key={event.id}>
+                  <td className="mono muted" style={{ whiteSpace: 'nowrap' }}>
+                    {formatStamp(event.created_at)}
+                  </td>
+                  <td>
+                    <span className="mono" style={{ fontWeight: 600 }}>
+                      {event.actor_username ?? 'система'}
+                    </span>
+                    {event.actor_role && <div className="hint">{event.actor_role}</div>}
+                  </td>
+                  <td className={LOUD.has(event.action) ? 'err-text' : ''} title={event.action}>
+                    {ACTION_LABEL[event.action] ?? event.action}
+                  </td>
+                  <td>
+                    <span className="mono">{event.target_label ?? '—'}</span>
+                    {event.target_type && <div className="hint">{event.target_type}</div>}
+                  </td>
+                  <td style={{ maxWidth: 280 }}>
+                    <Detail event={event} />
+                  </td>
+                  <td className="mono dim">{event.actor_ip ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      ))}
+      </section>
     </>
   )
 }

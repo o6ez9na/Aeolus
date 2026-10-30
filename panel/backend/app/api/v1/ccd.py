@@ -7,9 +7,9 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, OperatorUser, SessionDep
 from app.core.config import settings
-from app.models.node import ClientNodeGrant, ClientStatus
+from app.models.node import ClientGroupGrant, ClientNodeGrant, ClientStatus
 from app.schemas.ccd import CcdLimits, CcdRead, CcdUpdate, ExitUpdate
-from app.services import audit, ccd, openvpn, routing
+from app.services import audit, ccd, groups, openvpn, routing
 
 router = APIRouter(prefix="/ccd", tags=["ccd"])
 
@@ -45,6 +45,8 @@ def _serialize(grant: ClientNodeGrant) -> CcdRead:
         push_routes=grant.push_routes or [],
         iroutes=grant.iroutes or [],
         push_options=grant.push_options or [],
+        networks=grant.networks,
+        group_id=grant.group_id,
         preview=ccd.render(
             grant, grant.client.common_name, proto="udp", allowed=allowed
         ),
@@ -110,7 +112,14 @@ async def update_entry(
         if "push_options" in payload:
             values = payload["push_options"] or []
             grant.push_options = [ccd.validate_push(v) for v in values] or None
-    except ccd.CcdError as exc:
+        if "networks" in payload:
+            if grant.group_id is not None:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "этот доступ выдан группой: сети меняются в настройках группы",
+                )
+            grant.networks = groups.validate_scope(payload["networks"], grant.node)
+    except (ccd.CcdError, groups.GroupError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
 
     await audit.record(
@@ -153,6 +162,22 @@ async def set_exit(
     time; asking for a second one is refused rather than silently reshuffled.
     """
     grant = await _load(session, grant_id)
+
+    if grant.client.group_id is not None:
+        group_exit = await session.scalar(
+            select(ClientGroupGrant)
+            .where(
+                ClientGroupGrant.group_id == grant.client.group_id,
+                ClientGroupGrant.is_exit.is_(True),
+            )
+            .options(selectinload(ClientGroupGrant.node))
+        )
+        if group_exit is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"выход этому клиенту задаёт группа: весь трафик идёт через "
+                f"{group_exit.node.name}. Поменяй выход группе или выведи клиента из неё",
+            )
 
     if body.is_exit:
         other = await session.scalar(

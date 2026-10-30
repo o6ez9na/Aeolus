@@ -1,9 +1,13 @@
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 
 import { useAuth } from '../auth/AuthContext'
-import { formatAgo, formatBytes } from '../lib/format'
-import { useResource } from '../lib/useResource'
+import { formatAgo } from '../lib/format'
+import { MeshProvider, useMesh } from '../lib/mesh'
+import { clientState, nodeState } from '../lib/model'
 import { useTheme } from '../theme/ThemeContext'
+import { CommandPalette } from './CommandPalette'
+import { Icon } from './Icon'
 
 const ROLE_LABELS = {
   admin: 'админ',
@@ -11,113 +15,174 @@ const ROLE_LABELS = {
   viewer: 'наблюдатель',
 }
 
-const TABS = [
-  { to: '/nodes', label: 'узлы' },
-  { to: '/clients', label: 'клиенты' },
-  { to: '/pki', label: 'pki' },
-  { to: '/ccd', label: 'ccd' },
-  { to: '/traffic', label: 'трафик' },
-  { to: '/audit', label: 'аудит' },
+const NAV = [
+  { to: '/map', label: 'Карта', icon: 'map' },
+  { to: '/clients', label: 'Клиенты', icon: 'users' },
+  { to: '/nodes', label: 'Узлы', icon: 'server', badge: 'pending' },
+  { to: '/ccd', label: 'Доступ', icon: 'sliders' },
+  { to: '/pki', label: 'PKI', icon: 'key' },
+  { to: '/traffic', label: 'Трафик', icon: 'activity' },
+  { to: '/audit', label: 'Аудит', icon: 'list' },
 ]
 
-function StatStrip({ summary, updatedAt }) {
-  if (!summary) return <div className="stats muted">загрузка…</div>
+function Stats() {
+  const { nodes, clients, updatedAt } = useMesh()
+  if (!nodes || !clients) return <div className="stats dim">загрузка…</div>
+
+  const members = nodes.filter((n) => n.approval === 'approved' && n.is_enabled)
+  const up = members.filter((n) => nodeState(n) === 'up').length
+  const sessions = clients.filter((c) => c.session).length
+  const active = clients.filter((c) => c.status === 'active').length
+  const down = members.length - up
 
   return (
-    <div className="stats fade-in" key={updatedAt}>
-      <span className="muted">
-        онлайн <span className="hl">{summary.nodes_online}/{summary.nodes_total}</span>
+    <div className="stats" title={updatedAt ? `обновлено ${formatAgo(new Date(updatedAt).toISOString())}` : ''}>
+      <span className="chip lg">
+        <span className={down ? 'dot err' : 'dot live'} />
+        узлы <b>{up}/{members.length}</b>
       </span>
-      <span className="sep">·</span>
-      <span className="muted">
-        сессий <span className="hl">{summary.sessions}</span>
+      <span className="chip lg">
+        сессии <b>{sessions}</b>
       </span>
-      <span className="sep">·</span>
-      <span className="muted">
-        клиентов{' '}
-        <span className="hl">
-          {summary.clients_active}/{summary.clients_total}
-        </span>
-      </span>
-      <span className="sep">·</span>
-      <span className="muted">
-        rx <span className="hl">{formatBytes(summary.rx_bytes)}</span>
-      </span>
-      <span className="muted">
-        tx <span className="hl">{formatBytes(summary.tx_bytes)}</span>
-      </span>
-      <span className="sep">·</span>
-      <span className="muted">
-        fail{' '}
-        <span style={{ color: summary.failed_nodes ? 'var(--err)' : 'var(--text)' }}>
-          {summary.failed_nodes}
-        </span>
+      <span className="chip lg">
+        клиенты <b>{active}/{clients.length}</b>
       </span>
     </div>
   )
 }
 
-export function AppShell() {
+function Rail({ onSearch }) {
   const { user, logout } = useAuth()
   const { theme, toggle } = useTheme()
-  const location = useLocation()
+  const { nodes } = useMesh()
+  const pending = (nodes ?? []).filter((n) => n.approval === 'pending').length
 
-  // Summary is shared chrome, so it lives here and refreshes on its own.
-  const { data: summary, updatedAt, reload } = useResource('/nodes/summary', {
-    pollMs: 15000,
-  })
+  return (
+    <nav className="rail" aria-label="Разделы">
+      <NavLink to="/map" className="rail-logo" aria-label="Aeolus — карта">
+        <Icon name="logo" size={22} stroke={1.9} />
+      </NavLink>
+      {NAV.map((item) => (
+        <NavLink
+          key={item.to}
+          to={item.to}
+          className={({ isActive }) => (isActive ? 'navi active' : 'navi')}
+        >
+          <Icon name={item.icon} size={20} stroke={1.6} />
+          {item.label}
+          {item.badge === 'pending' && pending > 0 && (
+            <span className="navi-badge" aria-label={`заявок: ${pending}`}>
+              {pending}
+            </span>
+          )}
+        </NavLink>
+      ))}
+      <button className="navi rail-search" type="button" onClick={onSearch}>
+        <Icon name="search" size={20} stroke={1.6} />
+        Поиск
+      </button>
+      <div className="rail-spacer" />
+      <button
+        className="navi"
+        type="button"
+        onClick={toggle}
+        aria-label={`Тема: ${theme === 'dark' ? 'тёмная' : 'светлая'}, переключить`}
+      >
+        <Icon name="theme" size={20} stroke={1.6} />
+        Тема
+      </button>
+      <button
+        className="navi"
+        type="button"
+        onClick={() => void logout()}
+        title={`${user?.username} · ${ROLE_LABELS[user?.role] ?? user?.role}`}
+      >
+        <span className="avatar" aria-hidden="true">
+          {(user?.username ?? '?').slice(0, 1).toUpperCase()}
+        </span>
+        Выйти
+      </button>
+    </nav>
+  )
+}
+
+function Shell() {
+  const location = useLocation()
+  const [palette, setPalette] = useState(false)
+  const { clients, nodes, error } = useMesh()
+
+  useEffect(() => {
+    function onKey(event) {
+      const typing = event.target.matches?.('input, select, textarea, [contenteditable]')
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setPalette((open) => !open)
+      } else if (event.key === '/' && !typing) {
+        event.preventDefault()
+        setPalette(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const noAccess = (clients ?? []).filter((c) => clientState(c) === 'noaccess').length
+  const pending = (nodes ?? []).filter((n) => n.approval === 'pending').length
 
   return (
     <div className="shell">
-      <div className="term">
-        <div className="term-head">
-          <span className="term-title">aeolus</span>
-          <span className="dim">control</span>
+      <Rail onSearch={() => setPalette(true)} />
+      <main className="main">
+        <div className="topbar">
+          <button className="search-trigger" type="button" onClick={() => setPalette(true)}>
+            <Icon name="search" size={16} />
+            <span>Клиент, узел, адрес или команда</span>
+            <span className="kbd">Ctrl K</span>
+          </button>
+          <Stats />
           <span className="spacer" />
-          {/* Role is shown as a translated chip, so "admin/admin" never reads twice. */}
-          <span className="user-chip">
-            <span className="muted">{user?.username}</span>
-            <span className="role">{ROLE_LABELS[user?.role] ?? user?.role}</span>
-          </span>
-          <button
-            className="btn ghost"
-            onClick={toggle}
-            title="Переключить тему"
-            aria-label={`Тема: ${theme === 'dark' ? 'тёмная' : 'светлая'}`}
-          >
-            {theme === 'dark' ? '◐ тёмная' : '◑ светлая'}
-          </button>
-          <button className="btn ghost" onClick={() => void logout()}>
-            выход
-          </button>
-        </div>
-
-        <nav className="tabs">
-          {TABS.map((tab) => (
-            <NavLink
-              key={tab.to}
-              to={tab.to}
-              className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
-            >
-              {tab.label}
+          {pending > 0 && (
+            <NavLink to="/nodes" className="chip lg warn" style={{ textDecoration: 'none' }}>
+              <Icon name="warn" size={14} />
+              заявок: {pending}
             </NavLink>
-          ))}
-        </nav>
-
-        <StatStrip summary={summary} updatedAt={updatedAt} />
-
+          )}
+          {noAccess > 0 && (
+            <NavLink to="/clients?filter=noaccess" className="chip lg" style={{ textDecoration: 'none' }}>
+              без доступа: {noAccess}
+            </NavLink>
+          )}
+        </div>
+        {error && <div className="notice err">{error}</div>}
         {/* Remounting on pathname replays the enter animation on every route change. */}
-        <div className="term-body view" key={location.pathname}>
-          <Outlet context={{ reloadSummary: reload }} />
+        <div className="view stack-lg" key={location.pathname}>
+          <Outlet />
         </div>
+      </main>
+      {palette && <CommandPalette onClose={() => setPalette(false)} />}
+    </div>
+  )
+}
 
-        <div className="term-foot">
-          <span className="dim">openvpn · gRPC+mTLS</span>
-          <span className="spacer" />
-          <span className="dim">
-            обновлено {updatedAt ? formatAgo(new Date(updatedAt).toISOString()) : '—'}
-          </span>
+export function AppShell() {
+  return (
+    <MeshProvider>
+      <Shell />
+    </MeshProvider>
+  )
+}
+
+/** Title row shared by every page. */
+export function PageHead({ title, sub, actions, crumbs }) {
+  return (
+    <div className="stack" style={{ gap: 6 }}>
+      {crumbs}
+      <div className="page-head">
+        <div className="titles">
+          <h1>{title}</h1>
+          {sub && <span className="sub">{sub}</span>}
         </div>
+        {actions && <div className="actions">{actions}</div>}
       </div>
     </div>
   )

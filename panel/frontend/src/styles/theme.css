@@ -1,14 +1,19 @@
 /*
- * Muted monochrome terminal palette. Dark is the reference design; light is the
- * same structure with the ramp inverted, so component CSS never branches on theme.
+ * Graphite ground with three signal hues that never mean anything else:
+ * green is a live session, blue is the transit and the primary action, violet
+ * is "out to the internet". Light is the same structure with the ramp
+ * inverted, so component CSS never branches on theme.
  */
 :root {
-  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
-    'Liberation Mono', monospace;
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --radius: 16px;
+  --radius-md: 12px;
+  --radius-sm: 9px;
 
   --dur-fast: 120ms;
   --dur: 190ms;
-  --dur-slow: 280ms;
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
@@ -16,57 +21,67 @@
 [data-theme='dark'] {
   color-scheme: dark;
 
-  --bg: #131417;
-  --surface: #1b1c1f;
-  --surface-raised: #202226;
-  --border: #2c2e33;
-  --border-row: #26282c;
-  --border-strong: #3e4046;
+  --bg: #0e1012;
+  --surface: #15181b;
+  --raised: #1c2024;
+  --hover: #22272c;
+  --line: #262b30;
+  --line-strong: #353b42;
+  --grid: #20252a;
 
-  --text: #c4c5c8;
-  --text-muted: #8e9095;
-  --text-dim: #65676b;
-  --text-tab: #7e8084;
+  --text: #e7e9eb;
+  --muted: #a3aab2;
+  --dim: #8b929a;
 
-  --chip-bg: #33353a;
-  --chip-text: #c4c5c8;
+  --live: #3fcf9a;
+  --live-soft: rgb(63 207 154 / 14%);
+  --transit: #6ea8fe;
+  --exit: #b197fc;
+  --exit-soft: rgb(177 151 252 / 14%);
+  --warn: #f2b45a;
+  --warn-soft: rgb(242 180 90 / 12%);
+  --err: #f2766b;
+  --err-soft: rgb(242 118 107 / 12%);
 
-  --ok: #6fa98c;
-  --warn: #c9a15e;
-  --err: #c9807a;
+  --accent: #6ea8fe;
+  --accent-soft: rgb(110 168 254 / 22%);
+  --on-accent: #08162b;
+  --knob: #0b1a14;
 
-  --bar-fill: #9a9ca0;
-  --bar-empty: #33353a;
-
-  --focus: #8e9095;
-  --shadow: 0 12px 32px rgb(0 0 0 / 45%);
+  --shadow: 0 12px 32px rgb(0 0 0 / 38%);
+  --scrim: rgb(0 0 0 / 55%);
 }
 
 [data-theme='light'] {
   color-scheme: light;
 
-  --bg: #e9e9e6;
-  --surface: #f6f6f4;
-  --surface-raised: #fdfdfc;
-  --border: #d3d3ce;
-  --border-row: #dedeD9;
-  --border-strong: #b6b6b0;
+  --bg: #f2f3f5;
+  --surface: #ffffff;
+  --raised: #f7f8fa;
+  --hover: #eef0f3;
+  --line: #e2e5e9;
+  --line-strong: #cdd2d8;
+  --grid: #dde1e6;
 
-  --text: #2f3033;
-  --text-muted: #63656a;
-  --text-dim: #86888d;
-  --text-tab: #75777c;
+  --text: #1b1f24;
+  --muted: #4d5661;
+  --dim: #5f6873;
 
-  --chip-bg: #dcdcd6;
-  --chip-text: #2f3033;
+  --live: #0f8a5f;
+  --live-soft: rgb(15 138 95 / 10%);
+  --transit: #2f6fd6;
+  --exit: #7a4fd8;
+  --exit-soft: rgb(122 79 216 / 10%);
+  --warn: #9a5b00;
+  --warn-soft: rgb(201 130 20 / 12%);
+  --err: #c2392d;
+  --err-soft: rgb(194 57 45 / 10%);
 
-  --ok: #43775e;
-  --warn: #8a6524;
-  --err: #9b4f48;
+  --accent: #2f6fd6;
+  --accent-soft: rgb(47 111 214 / 16%);
+  --on-accent: #ffffff;
+  --knob: #ffffff;
 
-  --bar-fill: #6c6e73;
-  --bar-empty: #d3d3ce;
-
-  --focus: #63656a;
-  --shadow: 0 12px 32px rgb(0 0 0 / 12%);
+  --shadow: 0 12px 32px rgb(20 30 40 / 10%);
+  --scrim: rgb(20 30 40 / 35%);
 }

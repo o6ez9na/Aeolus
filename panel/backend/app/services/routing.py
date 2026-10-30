@@ -22,6 +22,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.models.node import Client, ClientNodeGrant, ClientStatus, Node, NodeApproval
+from app.services.groups import grant_networks
 
 
 def client_address(proto: str, host: int) -> str:
@@ -97,9 +98,10 @@ async def build_plan(session: AsyncSession) -> dict:
             if node is None:
                 continue
 
-            # Reaching a node means reaching the networks behind it. The hub
-            # itself has none: what a grant to the hub buys is the exit.
-            allow.extend(node.subnets or [])
+            # Reaching a node means reaching the networks behind it — all of
+            # them, or the part the grant names. The hub itself has none: what
+            # a grant to the hub buys is the exit.
+            allow.extend(grant_networks(grant.networks, node.subnets or []))
 
             if grant.is_exit:
                 exit_via = (

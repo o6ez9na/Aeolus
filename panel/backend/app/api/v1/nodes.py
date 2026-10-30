@@ -10,11 +10,12 @@ from app.models.node import Client, ClientStatus, Node, NodeApproval, NodeStatus
 from app.schemas.node import (
     EnrollmentToken,
     NodeCreate,
+    NodeDiagnostics,
     NodeRead,
     NodeSummary,
     NodeUpdate,
 )
-from app.services import agent, audit, openvpn, pki
+from app.services import agent, audit, diagnostics, openvpn, pki
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 
@@ -23,20 +24,7 @@ router = APIRouter(prefix="/nodes", tags=["nodes"])
 async def list_nodes(session: SessionDep, _: CurrentUser) -> list[NodeRead]:
     result = await session.scalars(select(Node).order_by(Node.name))
     connected = openvpn.transit_sessions()
-    nodes = []
-    for node in result:
-        data = NodeRead.model_validate(node)
-        # The hub is not its own transit peer; it is always reachable to itself.
-        data.transit_connected = node.is_hub or node.name in connected
-        data.transit_transport = (
-            ""
-            if node.is_hub
-            else "ws/443"
-            if node.transit_obfuscated
-            else f"{settings.vpn_transit_proto}/{settings.vpn_transit_port}"
-        )
-        nodes.append(data)
-    return nodes
+    return [_read(node, connected) for node in result]
 
 
 @router.get("/summary", response_model=NodeSummary)
@@ -111,9 +99,32 @@ async def _get_node(session: SessionDep, node_id: uuid.UUID) -> Node:
     return node
 
 
+def _read(node: Node, connected: set[str]) -> NodeRead:
+    data = NodeRead.model_validate(node)
+    # The hub is not its own transit peer; it is always reachable to itself.
+    data.transit_connected = node.is_hub or node.name in connected
+    data.transit_transport = (
+        ""
+        if node.is_hub
+        else "ws/443"
+        if node.transit_obfuscated
+        else f"{settings.vpn_transit_proto}/{settings.vpn_transit_port}"
+    )
+    return data
+
+
 @router.get("/{node_id}", response_model=NodeRead)
-async def get_node(node_id: uuid.UUID, session: SessionDep, _: CurrentUser) -> Node:
-    return await _get_node(session, node_id)
+async def get_node(node_id: uuid.UUID, session: SessionDep, _: CurrentUser) -> NodeRead:
+    return _read(await _get_node(session, node_id), openvpn.transit_sessions())
+
+
+@router.get("/{node_id}/diagnostics", response_model=NodeDiagnostics)
+async def node_diagnostics(
+    node_id: uuid.UUID, session: SessionDep, _: CurrentUser
+) -> NodeDiagnostics:
+    """What the panel can check about this node from its own side."""
+    node = await _get_node(session, node_id)
+    return NodeDiagnostics(**await diagnostics.build(session, node))
 
 
 @router.patch("/{node_id}", response_model=NodeRead)
@@ -123,7 +134,7 @@ async def update_node(
     request: Request,
     session: SessionDep,
     user: OperatorUser,
-) -> Node:
+) -> NodeRead:
     node = await _get_node(session, node_id)
     changes = body.model_dump(exclude_unset=True)
     for field, value in changes.items():
@@ -139,9 +150,13 @@ async def update_node(
         target_label=node.name,
         detail=audit.changed_fields(changes),
     )
+    # Switching a node off has to take its clients' routes with it, not wait
+    # for the next unrelated grant change to rewrite the plan.
+    await session.flush()
+    await openvpn.sync_routing_plan(session)
     await session.commit()
     await session.refresh(node)
-    return node
+    return _read(node, openvpn.transit_sessions())
 
 
 @router.post("/{node_id}/enrollment-token", response_model=EnrollmentToken)
@@ -188,6 +203,8 @@ async def delete_node(
         detail={"address": node.address},
     )
     await session.delete(node)
+    await session.flush()
+    await openvpn.sync_routing_plan(session)
     await session.commit()
 
 
@@ -222,6 +239,8 @@ async def approve_node(
             "subnets": node.subnets or [],
         },
     )
+    await session.flush()
+    await openvpn.sync_routing_plan(session)
     await session.commit()
     await session.refresh(node)
     return node

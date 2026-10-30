@@ -124,11 +124,23 @@ export async function authorizedDownload(path, filename) {
   URL.revokeObjectURL(url)
 }
 
+/** GET a plain-text resource (a rendered config) with the same auth handling. */
+export async function apiText(path) {
+  let response = await rawRequest(path, {}, accessToken)
+  if (response.status === 401 && getRefreshToken()) {
+    response = await rawRequest(path, {}, await refreshAccessToken())
+  }
+  if (!response.ok) throw new ApiError(response.status, await parseError(response))
+  return response.text()
+}
+
 export const api = {
   get: (path) => apiFetch(path),
   post: (path, body) =>
     apiFetch(path, { method: 'POST', body: JSON.stringify(body ?? {}) }),
   patch: (path, body) =>
     apiFetch(path, { method: 'PATCH', body: JSON.stringify(body ?? {}) }),
+  put: (path, body) =>
+    apiFetch(path, { method: 'PUT', body: JSON.stringify(body ?? {}) }),
   delete: (path) => apiFetch(path, { method: 'DELETE' }),
 }

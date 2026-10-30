@@ -1,23 +1,14 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { PageHead } from '../components/AppShell'
+import { Drawer } from '../components/Overlay'
+import { useToast } from '../components/Toast'
+import { useMesh } from '../lib/mesh'
+import { canEdit } from '../lib/model'
 import { useResource } from '../lib/useResource'
-
-/** A textarea holding one entry per line, which is how routes read best. */
-function LineList({ label, hint, value, onChange }) {
-  return (
-    <label className="field" style={{ flex: 1, minWidth: 220 }}>
-      {label}
-      <textarea
-        rows={3}
-        value={value}
-        placeholder={hint}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </label>
-  )
-}
 
 function toLines(list) {
   return (list ?? []).join('\n')
@@ -30,97 +21,29 @@ function fromLines(text) {
     .filter(Boolean)
 }
 
-function Editor({ entry, limits, onSave, onCancel, busy, error }) {
-  const [staticHost, setStaticHost] = useState(
-    entry.static_host === null ? '' : String(entry.static_host),
-  )
+function Editor({ entry, limits, editable, onSaved, onClose }) {
+  const toast = useToast()
+  const [staticHost, setStaticHost] = useState(entry.static_host === null ? '' : String(entry.static_host))
   const [routes, setRoutes] = useState(toLines(entry.push_routes))
   const [iroutes, setIroutes] = useState(toLines(entry.iroutes))
   const [options, setOptions] = useState(toLines(entry.push_options))
-
-  function submit(event) {
-    event.preventDefault()
-    onSave({
-      static_host: staticHost.trim() === '' ? null : Number(staticHost),
-      push_routes: fromLines(routes),
-      iroutes: fromLines(iroutes),
-      push_options: fromLines(options),
-    })
-  }
-
-  return (
-    <form className="inline-form fade-in" onSubmit={submit}>
-      <label className="field">
-        фиксированный адрес
-        <input
-          type="number"
-          min={limits.static_host_min}
-          max={limits.static_host_max}
-          value={staticHost}
-          placeholder="пусто — из пула"
-          onChange={(event) => setStaticHost(event.target.value)}
-        />
-        <span className="sub">
-          номер хоста {limits.static_host_min}–{limits.static_host_max}; выше — пул,
-          который OpenVPN раздаёт сам
-        </span>
-      </label>
-
-      <LineList
-        label="маршруты клиенту"
-        hint="192.168.5.0/24"
-        value={routes}
-        onChange={setRoutes}
-      />
-      <LineList
-        label="сети за клиентом (iroute)"
-        hint="10.20.0.0/16"
-        value={iroutes}
-        onChange={setIroutes}
-      />
-      <LineList
-        label="push-опции"
-        hint="dhcp-option DNS 10.8.0.1"
-        value={options}
-        onChange={setOptions}
-      />
-
-      <button className="btn" type="submit" disabled={busy}>
-        {busy ? 'сохраняю…' : 'сохранить'}
-      </button>
-      <button className="btn ghost" type="button" onClick={onCancel}>
-        отмена
-      </button>
-
-      <span className="sub" style={{ flexBasis: '100%' }}>
-        разрешённые push-опции: {limits.allowed_push_options.join(', ')}
-      </span>
-
-      {error && <span className="form-error">{error}</span>}
-
-      <pre className="ccd-preview">{entry.preview}</pre>
-    </form>
-  )
-}
-
-export function CcdPage() {
-  const { user } = useAuth()
-  const entries = useResource('/ccd', { pollMs: 30000 })
-  const limits = useResource('/ccd/limits')
-
-  const [openId, setOpenId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
-  const canEdit = user?.role === 'admin' || user?.role === 'operator'
-
-  async function save(entry, payload) {
+  async function submit(event) {
+    event.preventDefault()
     setBusy(true)
     setError(null)
     try {
-      await api.patch(`/ccd/${entry.id}`, payload)
-      setOpenId(null)
-      await entries.reload({ quiet: true })
+      await api.patch(`/ccd/${entry.id}`, {
+        static_host: staticHost.trim() === '' ? null : Number(staticHost),
+        push_routes: fromLines(routes),
+        iroutes: fromLines(iroutes),
+        push_options: fromLines(options),
+      })
+      toast.info(`${entry.client_name}@${entry.node_name}: ccd сохранён`)
+      await onSaved()
+      onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось сохранить')
     } finally {
@@ -128,90 +51,164 @@ export function CcdPage() {
     }
   }
 
-  if (entries.loading || limits.loading) return <div className="empty">загрузка ccd…</div>
-  if (entries.error) return <div className="empty form-error">{entries.error}</div>
+  return (
+    <Drawer title={`${entry.client_name} → ${entry.node_name}`} onClose={onClose} width={480}>
+      <form className="stack-lg" onSubmit={submit}>
+        <label className="field">
+          Фиксированный адрес (номер хоста {limits.static_host_min}–{limits.static_host_max})
+          <input
+            className="input mono"
+            type="number"
+            min={limits.static_host_min}
+            max={limits.static_host_max}
+            placeholder="пусто — адрес клиента по умолчанию"
+            value={staticHost}
+            disabled={!editable}
+            onChange={(event) => setStaticHost(event.target.value)}
+          />
+          <span className="hint">Выше этого диапазона — пул, который OpenVPN раздаёт сам.</span>
+        </label>
+        <label className="field">
+          Маршруты клиенту
+          <textarea
+            className="textarea"
+            rows={3}
+            placeholder="192.168.5.0/24"
+            value={routes}
+            disabled={!editable}
+            onChange={(event) => setRoutes(event.target.value)}
+          />
+        </label>
+        <label className="field">
+          Сети за клиентом (iroute)
+          <textarea
+            className="textarea"
+            rows={3}
+            placeholder="10.30.0.0/24"
+            value={iroutes}
+            disabled={!editable}
+            onChange={(event) => setIroutes(event.target.value)}
+          />
+        </label>
+        <label className="field">
+          push-опции
+          <textarea
+            className="textarea"
+            rows={3}
+            placeholder="dhcp-option DNS 10.8.0.1"
+            value={options}
+            disabled={!editable}
+            onChange={(event) => setOptions(event.target.value)}
+          />
+          <span className="hint">Разрешены: {limits.allowed_push_options.join(', ')}</span>
+        </label>
+        <div className="stack" style={{ gap: 6 }}>
+          <span className="lbl">Сейчас в файле</span>
+          <pre className="code wrap">{entry.preview}</pre>
+        </div>
+        {error && <div className="form-error">{error}</div>}
+        {editable && (
+          <button className="btn primary" type="submit" disabled={busy}>
+            {busy ? 'Сохраняю…' : 'Сохранить'}
+          </button>
+        )}
+      </form>
+    </Drawer>
+  )
+}
 
-  const list = entries.data ?? []
+export function CcdPage() {
+  const { user } = useAuth()
+  const mesh = useMesh()
+  const entries = useResource('/ccd', { pollMs: 30000 })
+  const limits = useResource('/ccd/limits')
+  const [params, setParams] = useSearchParams()
+  const editable = canEdit(user)
+  const clientFilter = params.get('client')
+  const openId = params.get('open')
+
+  const all = entries.data ?? []
+  const list = clientFilter ? all.filter((e) => e.client_id === clientFilter) : all
+  const open = all.find((e) => e.id === openId)
+  const filteredName = clientFilter && mesh.clients?.find((c) => c.id === clientFilter)?.common_name
+
+  const set = (key, value) =>
+    setParams((prev) => {
+      const p = new URLSearchParams(prev)
+      if (value) p.set(key, value)
+      else p.delete(key)
+      return p
+    })
 
   return (
     <>
-      <p className="sub" style={{ margin: '0 0 16px' }}>
-        Файл ccd читается узлом в момент подключения клиента: он закрепляет адрес,
-        добавляет персональные маршруты и push-опции. Клиент без доступа к узлу
-        получает <span className="hl">disable</span> — сертификат нашего CA сам по
-        себе узел не открывает.
-      </p>
-
-      <div className="row ccd head">
-        <span className="dim">клиент</span>
-        <span className="dim">узел</span>
-        <span className="dim">адрес в туннеле</span>
-        <span className="dim">маршруты</span>
-        <span className="dim">push</span>
-        <span />
-      </div>
-
-      {list.length === 0 && (
-        <div className="empty">
-          доступов нет: сначала выдай клиенту узел в разделе клиенты.
+      <PageHead
+        title="Доступ (ccd)"
+        sub="Что клиент получает при подключении: закреплённый адрес, маршруты и push-опции. Клиент без доступа получает disable."
+        actions={
+          filteredName && (
+            <button className="btn sm" type="button" onClick={() => set('client', null)}>
+              Только {filteredName} · показать всех
+            </button>
+          )
+        }
+      />
+      <section className="panel" style={{ overflow: 'hidden' }}>
+        {entries.error && <div className="notice err">{entries.error}</div>}
+        <div className="table-wrap">
+          <table className="table" style={{ minWidth: 720 }}>
+            <thead>
+              <tr>
+                <th>Клиент</th>
+                <th>Узел</th>
+                <th>Адрес</th>
+                <th>Маршруты</th>
+                <th>push</th>
+                <th>Выход</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!entries.loading && list.length === 0 && (
+                <tr>
+                  <td colSpan={6}>
+                    <div className="empty-state">Доступов нет: сначала выдай клиенту узел на карте или в карточке клиента.</div>
+                  </td>
+                </tr>
+              )}
+              {list.map((entry) => (
+                <tr key={entry.id} className="clickable" onClick={() => set('open', entry.id)}>
+                  <td>
+                    <div className="name-cell">
+                      <span className={entry.client_status === 'active' ? 'dot live' : 'dot off'} />
+                      <span className="names">
+                        <span className="n">{entry.client_name}</span>
+                        {entry.client_status !== 'active' && (
+                          <span className="l warn-text">{entry.client_status} — узел его не пустит</span>
+                        )}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="mono">{entry.node_name}</td>
+                  <td className="mono muted">{entry.static_address ?? entry.tunnel_address ?? 'из пула'}</td>
+                  <td className="muted">{entry.push_routes.length + entry.iroutes.length || '—'}</td>
+                  <td className="muted">{entry.push_options.length || '—'}</td>
+                  <td>{entry.is_exit ? <span className="chip exit">⇱ выход</span> : <span className="dim">—</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+      </section>
+      {open && limits.data && (
+        <Editor
+          key={open.id}
+          entry={open}
+          limits={limits.data}
+          editable={editable}
+          onSaved={() => Promise.all([entries.reload({ quiet: true }), mesh.reload()])}
+          onClose={() => set('open', null)}
+        />
       )}
-
-      {list.map((entry) => (
-        <div key={entry.id}>
-          <div className="row ccd">
-            <span>
-              <span className={`name ${entry.client_status === 'active' ? '' : 'faded'}`}>
-                {entry.client_name}
-              </span>
-              {entry.client_status !== 'active' && (
-                <div className="sub warn">{entry.client_status} — узел его не пустит</div>
-              )}
-            </span>
-            <span className="muted">{entry.node_name}</span>
-            <span className="muted">
-              {entry.static_address ? (
-                <>
-                  {entry.static_address}
-                  <div className="sub">tcp: {entry.static_address_tcp}</div>
-                </>
-              ) : (
-                <span className="sub">из пула</span>
-              )}
-            </span>
-            <span className="muted">
-              {entry.push_routes.length + entry.iroutes.length || <span className="sub">—</span>}
-            </span>
-            <span className="muted">
-              {entry.push_options.length || <span className="sub">—</span>}
-            </span>
-            <span className="right actions">
-              {canEdit && (
-                <button
-                  className="btn"
-                  onClick={() => {
-                    setError(null)
-                    setOpenId(openId === entry.id ? null : entry.id)
-                  }}
-                >
-                  {openId === entry.id ? 'скрыть' : 'настроить'}
-                </button>
-              )}
-            </span>
-          </div>
-
-          {openId === entry.id && (
-            <Editor
-              entry={entry}
-              limits={limits.data}
-              busy={busy}
-              error={error}
-              onSave={(payload) => save(entry, payload)}
-              onCancel={() => setOpenId(null)}
-            />
-          )}
-        </div>
-      ))}
     </>
   )
 }

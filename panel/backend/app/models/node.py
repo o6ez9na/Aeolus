@@ -157,6 +157,47 @@ class ClientStatus(str, enum.Enum):
     revoked = "revoked"
 
 
+class ClientGroup(Base, UUIDMixin, TimestampMixin):
+    """A role: the access its members get by belonging to it.
+
+    The grants live here, and every member carries a copy of them as ordinary
+    client grants marked with this group. Routing, ccd files and the agent only
+    ever read client grants, so a group is how an operator edits access, never a
+    second place the network has to look.
+    """
+
+    __tablename__ = "client_groups"
+
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+
+    grants: Mapped[list["ClientGroupGrant"]] = relationship(
+        back_populates="group", cascade="all, delete-orphan"
+    )
+    members: Mapped[list["Client"]] = relationship(back_populates="group")
+
+
+class ClientGroupGrant(Base, UUIDMixin, TimestampMixin):
+    """One node a group's members may use, and how much of it."""
+
+    __tablename__ = "client_group_grants"
+    __table_args__ = (UniqueConstraint("group_id", "node_id", name="uq_group_node"),)
+
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("client_groups.id", ondelete="CASCADE"), index=True
+    )
+    node_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), index=True
+    )
+    # Members send their whole internet out through this node. One per group.
+    is_exit: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Part of the node's LAN only: a subnet of it or single hosts. NULL means
+    # everything the node announces.
+    networks: Mapped[list[str] | None] = mapped_column(JSON)
+
+    group: Mapped[ClientGroup] = relationship(back_populates="grants")
+    node: Mapped["Node"] = relationship()
+
+
 class Client(Base, UUIDMixin, TimestampMixin):
     """A VPN subscriber. Owns exactly one issued OpenVPN client certificate."""
 
@@ -193,6 +234,13 @@ class Client(Base, UUIDMixin, TimestampMixin):
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
+
+    # At most one group: its access is the client's baseline, and two roles
+    # disagreeing about the same node would have no obvious winner.
+    group_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("client_groups.id", ondelete="SET NULL"), index=True
+    )
+    group: Mapped[ClientGroup | None] = relationship(back_populates="members")
 
     grants: Mapped[list["ClientNodeGrant"]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
@@ -248,6 +296,16 @@ class ClientNodeGrant(Base, UUIDMixin, TimestampMixin):
     # Extra push directives, validated against an allow list before they land in
     # a ccd file: a bad line there stops the client connecting at all.
     push_options: Mapped[list[str] | None] = mapped_column(JSON)
+
+    # Only part of the node's LAN: a subnet of it or single hosts. NULL means
+    # every network the node announces.
+    networks: Mapped[list[str] | None] = mapped_column(JSON)
+
+    # Set when this grant exists because the client belongs to a group; the
+    # group then owns it, and leaving the group takes it away.
+    group_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("client_groups.id", ondelete="CASCADE"), index=True
+    )
 
     client: Mapped[Client] = relationship(back_populates="grants")
     node: Mapped[Node] = relationship(back_populates="grants")

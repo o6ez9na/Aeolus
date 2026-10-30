@@ -18,6 +18,7 @@ async def list_events(
     action: Annotated[str | None, Query(max_length=48)] = None,
     actor: Annotated[str | None, Query(max_length=64)] = None,
     target_type: Annotated[str | None, Query(max_length=32)] = None,
+    target_id: Annotated[str | None, Query(max_length=64)] = None,
     since: datetime | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -31,6 +32,9 @@ async def list_events(
         filters.append(AuditEvent.actor_username.ilike(f"%{actor}%"))
     if target_type:
         filters.append(AuditEvent.target_type == target_type)
+    if target_id:
+        # One object's history, as on a node's own page.
+        filters.append(AuditEvent.target_id == target_id)
     if since:
         filters.append(AuditEvent.created_at >= since)
 

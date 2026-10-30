@@ -14,6 +14,10 @@ export function ThemeProvider({ children }) {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
+    // The phone's status bar and the installed app's title bar follow the theme.
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', theme === 'light' ? '#f2f3f5' : '#0e1012')
     localStorage.setItem(STORAGE_KEY, theme)
   }, [theme])
 

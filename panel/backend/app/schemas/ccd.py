@@ -16,6 +16,8 @@ class CcdUpdate(BaseModel):
     push_routes: list[str] | None = Field(default=None, max_length=32)
     iroutes: list[str] | None = Field(default=None, max_length=32)
     push_options: list[str] | None = Field(default=None, max_length=32)
+    # Only part of the node's LAN; null for all of it.
+    networks: list[str] | None = Field(default=None, max_length=64)
 
 
 class CcdRead(BaseModel):
@@ -39,6 +41,8 @@ class CcdRead(BaseModel):
     push_routes: list[str] = []
     iroutes: list[str] = []
     push_options: list[str] = []
+    networks: list[str] | None = None
+    group_id: uuid.UUID | None = None
     # Rendered file, so an operator can see exactly what the node will read.
     preview: str = ""
 

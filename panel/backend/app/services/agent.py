@@ -27,6 +27,7 @@ from app.models.node import (
 )
 from app.services import ccd as ccd_service
 from app.services import openvpn, pki, routing
+from app.services.groups import grant_networks
 
 logger = logging.getLogger("aeolus.agent")
 
@@ -384,7 +385,9 @@ async def _build_ccd(session: AsyncSession, node: Node, *, proto: str) -> dict[s
             for held in client.grants:
                 if held.is_exit:
                     default_route = True
-                routes.extend(subnets_by_node.get(held.node_id, []))
+                routes.extend(
+                    grant_networks(held.networks, subnets_by_node.get(held.node_id, []))
+                )
 
         entries[client.common_name] = ccd_service.render(
             grant,

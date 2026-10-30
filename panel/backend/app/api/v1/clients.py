@@ -8,15 +8,32 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, OperatorUser, SessionDep
 from app.core.crypto import SecretUnreadableError
-from app.models.node import Client, ClientNodeGrant, Node
-from app.schemas.node import ClientCreate, ClientGrantRead, ClientRead, ClientUpdate
-from app.services import audit, openvpn, pki, routing
+from app.models.node import (
+    Client,
+    ClientGroup,
+    ClientNodeGrant,
+    ClientStatus,
+    Node,
+    NodeApproval,
+)
+from app.schemas.node import (
+    ClientCreate,
+    ClientGrantRead,
+    ClientRead,
+    ClientSessionRead,
+    ClientUpdate,
+)
+from app.services import audit, ccd, groups, openvpn, pki, routing
 
 router = APIRouter(prefix="/clients", tags=["clients"])
 
 
-def _serialize(client: Client) -> ClientRead:
+def _serialize(client: Client, sessions: dict[str, dict] | None = None) -> ClientRead:
     data = ClientRead.model_validate(client)
+    if sessions is None:
+        sessions = openvpn.client_sessions()
+    live = sessions.get(client.common_name)
+    data.session = ClientSessionRead(**live) if live else None
     data.node_ids = [grant.node_id for grant in client.grants]
     data.access = [
         ClientGrantRead(
@@ -26,10 +43,14 @@ def _serialize(client: Client) -> ClientRead:
             node_is_hub=grant.node.is_hub,
             node_subnets=grant.node.subnets or [],
             is_exit=grant.is_exit,
+            networks=grant.networks,
+            group_id=grant.group_id,
         )
         for grant in client.grants
         if grant.node is not None
     ]
+    data.group_id = client.group_id
+    data.group_name = client.group.name if client.group is not None else None
     if client.tunnel_host is not None:
         data.tunnel_address = openvpn.static_address("udp", client.tunnel_host)
     exit_grant = next((g for g in client.grants if g.is_exit), None)
@@ -41,7 +62,10 @@ async def _load(session: SessionDep, client_id: uuid.UUID) -> Client:
     client = await session.scalar(
         select(Client)
         .where(Client.id == client_id)
-        .options(selectinload(Client.grants).selectinload(ClientNodeGrant.node))
+        .options(
+            selectinload(Client.grants).selectinload(ClientNodeGrant.node),
+            selectinload(Client.group),
+        )
     )
     if client is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Client not found")
@@ -60,14 +84,27 @@ async def _validate_nodes(session: SessionDep, node_ids: list[uuid.UUID]) -> Non
         )
 
 
+async def _group(session: SessionDep, group_id: uuid.UUID | None) -> ClientGroup | None:
+    if group_id is None:
+        return None
+    group = await groups.load_group(session, group_id)
+    if group is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Группа не найдена")
+    return group
+
+
 @router.get("", response_model=list[ClientRead])
 async def list_clients(session: SessionDep, _: CurrentUser) -> list[ClientRead]:
     result = await session.scalars(
         select(Client)
-        .options(selectinload(Client.grants).selectinload(ClientNodeGrant.node))
+        .options(
+            selectinload(Client.grants).selectinload(ClientNodeGrant.node),
+            selectinload(Client.group),
+        )
         .order_by(Client.common_name)
     )
-    return [_serialize(client) for client in result]
+    sessions = openvpn.client_sessions()
+    return [_serialize(client, sessions) for client in result]
 
 
 @router.post("", response_model=ClientRead, status_code=status.HTTP_201_CREATED)
@@ -84,6 +121,10 @@ async def create_client(
         created_by_id=user.id,
     )
     client.grants = [ClientNodeGrant(node_id=node_id) for node_id in body.node_ids]
+    group = await _group(session, body.group_id)
+    if group is not None:
+        client.group = group
+        groups.sync_client(client, group)
     # An address is part of being a client: the hub writes every rule about it
     # by address, so one is reserved now rather than when it first connects.
     await routing.ensure_tunnel_host(session, client)
@@ -105,7 +146,11 @@ async def create_client(
         target_type="client",
         target_id=client.id,
         target_label=client.common_name,
-        detail={"node_ids": body.node_ids, "expires_at": body.expires_at},
+        detail={
+            "node_ids": body.node_ids,
+            "group": group.name if group else None,
+            "expires_at": body.expires_at,
+        },
     )
     await openvpn.sync_routing_plan(session)
     await session.commit()
@@ -125,6 +170,8 @@ async def update_client(
     payload = body.model_dump(exclude_unset=True)
 
     node_ids = payload.pop("node_ids", None)
+    group_change = "group_id" in payload
+    new_group_id = payload.pop("group_id", None)
     for field, value in payload.items():
         setattr(client, field, value)
 
@@ -132,12 +179,21 @@ async def update_client(
         await _validate_nodes(session, node_ids)
         # Keep the existing grant rows for nodes that stay: they carry the ccd
         # settings, and rebuilding the list from scratch would silently drop a
-        # client's fixed address and routes.
+        # client's fixed address and routes. What the group gives is not the
+        # client's to drop one node at a time, so those rows stay as well.
+        from_group = [grant for grant in client.grants if grant.group_id is not None]
+        covered = {grant.node_id for grant in from_group}
         existing = {grant.node_id: grant for grant in client.grants}
-        client.grants = [
+        client.grants = from_group + [
             existing.get(node_id) or ClientNodeGrant(node_id=node_id)
             for node_id in node_ids
+            if node_id not in covered
         ]
+
+    group = await _group(session, new_group_id if group_change else client.group_id)
+    if group_change:
+        client.group = group
+    groups.sync_client(client, group)
 
     await audit.record(
         session,
@@ -152,6 +208,45 @@ async def update_client(
     await openvpn.sync_routing_plan(session)
     await session.commit()
     return _serialize(await _load(session, client_id))
+
+
+@router.get("/{client_id}/ccd", response_class=PlainTextResponse)
+async def client_ccd(
+    client_id: uuid.UUID,
+    session: SessionDep,
+    _: CurrentUser,
+    proto: str = "udp",
+) -> str:
+    """The file the hub hands this client at connect time, as it is written.
+
+    Built the way the agent builds it for the hub: every network the client's
+    grants open, its exit, its address.
+    """
+    client = await _load(session, client_id)
+    hub = await session.scalar(select(Node).where(Node.is_hub.is_(True)))
+    subnets = {
+        node.id: node.subnets or []
+        for node in await session.scalars(
+            select(Node).where(Node.approval == NodeApproval.approved, Node.is_enabled.is_(True))
+        )
+    }
+    allowed = client.status == ClientStatus.active
+    routes: list[str] = []
+    default_route = False
+    if allowed:
+        for held in client.grants:
+            default_route = default_route or held.is_exit
+            routes.extend(groups.grant_networks(held.networks, subnets.get(held.node_id, [])))
+    own = next((g for g in client.grants if hub and g.node_id == hub.id), None)
+    return ccd.render(
+        own,
+        client.common_name,
+        proto="tcp" if proto == "tcp" else "udp",
+        allowed=allowed,
+        tunnel_host=client.tunnel_host,
+        default_route=default_route,
+        routes=sorted(set(routes)),
+    )
 
 
 @router.get("/{client_id}/config", response_class=PlainTextResponse)

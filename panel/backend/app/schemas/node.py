@@ -83,6 +83,28 @@ class NodeRead(NodeBase):
         return value or []
 
 
+class NodeCheck(BaseModel):
+    key: str
+    # ok | warn | fail | unknown — unknown when the panel has nothing to judge by.
+    status: str
+    title: str
+    detail: str = ""
+
+
+class NodeFile(BaseModel):
+    name: str
+    content: str
+
+
+class NodeDiagnostics(BaseModel):
+    """Checks and read-only configuration for one node's page."""
+
+    checks: list[NodeCheck]
+    files: list[NodeFile]
+    # Clients whose whole internet leaves through this node.
+    exit_for: list[str] = []
+
+
 class EnrollmentToken(BaseModel):
     """Returned once, at creation time."""
 
@@ -114,6 +136,21 @@ class ClientGrantRead(BaseModel):
     node_is_hub: bool
     node_subnets: list[str] = []
     is_exit: bool = False
+    # Only part of the node's LAN; None means all of it.
+    networks: list[str] | None = None
+    # The group this grant comes from; None for a personal grant.
+    group_id: uuid.UUID | None = None
+
+
+class ClientSessionRead(BaseModel):
+    """A live session on the hub, straight from OpenVPN's status file."""
+
+    proto: str
+    real_address: str
+    virtual_address: str = ""
+    rx_bytes: int = 0
+    tx_bytes: int = 0
+    connected_since: str = ""
 
 
 class ClientRead(BaseModel):
@@ -138,6 +175,10 @@ class ClientRead(BaseModel):
     # Not called `grants`: that name belongs to the ORM relationship, and
     # validating the model would try to read the rows through it.
     access: list[ClientGrantRead] = []
+    # None while the client is not connected to the hub right now.
+    session: ClientSessionRead | None = None
+    group_id: uuid.UUID | None = None
+    group_name: str | None = None
 
 
 class ClientCreate(BaseModel):
@@ -146,9 +187,7 @@ class ClientCreate(BaseModel):
     expires_at: datetime | None = None
     traffic_limit_bytes: int | None = Field(default=None, ge=0)
     node_ids: list[uuid.UUID] = []
-    # Not called `grants`: that name belongs to the ORM relationship, and
-    # validating the model would try to read the rows through it.
-    access: list[ClientGrantRead] = []
+    group_id: uuid.UUID | None = None
 
 
 class ClientUpdate(BaseModel):
@@ -157,3 +196,5 @@ class ClientUpdate(BaseModel):
     expires_at: datetime | None = None
     traffic_limit_bytes: int | None = Field(default=None, ge=0)
     node_ids: list[uuid.UUID] | None = None
+    # Sent as null to take the client out of its group.
+    group_id: uuid.UUID | None = None

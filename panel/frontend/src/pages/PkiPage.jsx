@@ -2,246 +2,269 @@ import { useCallback, useState } from 'react'
 
 import { api, authorizedDownload } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { PageHead } from '../components/AppShell'
 import { ConfirmButton } from '../components/ConfirmButton'
-import { daysUntil, pluralRu } from '../lib/format'
+import { Icon } from '../components/Icon'
+import { useToast } from '../components/Toast'
+import { daysUntil, formatDate } from '../lib/format'
+import { useMesh } from '../lib/mesh'
+import { canEdit } from '../lib/model'
 import { useResource } from '../lib/useResource'
 
-function CertLife({ notAfter }) {
-  if (!notAfter) return <span className="sub warn">нет сертификата</span>
+function Life({ notAfter, revoked }) {
+  if (revoked) return <span className="err-text">отозван</span>
+  if (!notAfter) return <span className="warn-text">нет сертификата</span>
   const days = daysUntil(notAfter)
-  const cls = days <= 14 ? 'sub err' : days <= 60 ? 'sub warn' : 'sub'
+  const cls = days <= 14 ? 'err-text' : days <= 60 ? 'warn-text' : 'muted'
   return (
     <span className={cls}>
-      {days} {pluralRu(days, 'день', 'дня', 'дней')}
+      {days} дн · до {formatDate(notAfter)}
     </span>
-  )
-}
-
-function CaCard({ status, canInit, onInit, busy, error }) {
-  if (!status.initialised) {
-    return (
-      <div className="empty">
-        <div className="name">удостоверяющий центр не создан</div>
-        <p className="sub" style={{ margin: '8px 0 16px' }}>
-          Без CA нельзя выпустить ни серверный, ни клиентский сертификат. Ключ CA
-          хранится в базе в зашифрованном виде и никуда не выгружается.
-        </p>
-        {canInit ? (
-          <button className="btn" onClick={onInit} disabled={busy}>
-            {busy ? 'создаю…' : 'создать CA'}
-          </button>
-        ) : (
-          <span className="sub">создание CA доступно только админу</span>
-        )}
-        {error && <div className="form-error">{error}</div>}
-      </div>
-    )
-  }
-
-  return (
-    <div className="ca-card">
-      <div className="ca-facts">
-        <span className="muted">
-          CA <span className="hl">{status.common_name}</span>
-        </span>
-        <span className="sep">·</span>
-        <span className="muted">
-          истекает <CertLife notAfter={status.not_after} />
-        </span>
-        <span className="sep">·</span>
-        <span className="muted">
-          выпущено <span className="hl">{status.issued_certificates}</span>
-        </span>
-        <span className="sep">·</span>
-        <span className="muted">
-          отозвано{' '}
-          <span style={{ color: status.revoked_clients ? 'var(--err)' : 'var(--text)' }}>
-            {status.revoked_clients}
-          </span>
-        </span>
-        <span className="sep">·</span>
-        <span className="muted">
-          crl <span className="hl">#{status.crl_number}</span>
-        </span>
-      </div>
-      <div className="ca-actions">
-        <button className="btn" onClick={() => authorizedDownload('/pki/ca.crt', 'ca.crt')}>
-          скачать ca.crt
-        </button>
-        <button className="btn" onClick={() => authorizedDownload('/pki/crl.pem', 'crl.pem')}>
-          скачать crl
-        </button>
-      </div>
-    </div>
   )
 }
 
 export function PkiPage() {
   const { user } = useAuth()
+  const mesh = useMesh()
+  const toast = useToast()
   const ca = useResource('/pki')
-  const nodes = useResource('/nodes')
-  const clients = useResource('/clients')
-
+  const editable = canEdit(user)
   const [busy, setBusy] = useState(null)
-  const [error, setError] = useState(null)
 
-  const canEdit = user?.role === 'admin' || user?.role === 'operator'
+  const run = useCallback(
+    async (key, action, message) => {
+      setBusy(key)
+      try {
+        await action()
+        toast.info(message)
+        await Promise.all([ca.reload({ quiet: true }), mesh.reload()])
+      } catch (err) {
+        toast.error(err)
+      } finally {
+        setBusy(null)
+      }
+    },
+    [ca, mesh, toast],
+  )
 
-  const refreshAll = useCallback(async () => {
-    await Promise.all([
-      ca.reload({ quiet: true }),
-      nodes.reload({ quiet: true }),
-      clients.reload({ quiet: true }),
-    ])
-  }, [ca, nodes, clients])
+  if (ca.loading || mesh.loading) {
+    return (
+      <>
+        <PageHead title="PKI" />
+        <div className="panel empty-state">загрузка…</div>
+      </>
+    )
+  }
+  if (ca.error) return <div className="notice err">{ca.error}</div>
 
-  async function run(key, action) {
-    setBusy(key)
-    setError(null)
-    try {
-      await action()
-      await refreshAll()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Операция не удалась')
-    } finally {
-      setBusy(null)
-    }
+  const status = ca.data
+  if (!status.initialised) {
+    return (
+      <>
+        <PageHead title="PKI" />
+        <div className="panel empty-state">
+          <h3>Удостоверяющий центр не создан</h3>
+          <span>Без CA нельзя выпустить ни серверный, ни клиентский сертификат. Ключ CA хранится в базе зашифрованным.</span>
+          {user?.role === 'admin' ? (
+            <button
+              className="btn primary"
+              type="button"
+              disabled={busy === 'init'}
+              onClick={() => run('init', () => api.post('/pki/init', { common_name: 'Aeolus CA' }), 'CA создан')}
+            >
+              Создать CA
+            </button>
+          ) : (
+            <span className="hint">Создать CA может только админ</span>
+          )}
+        </div>
+      </>
+    )
   }
 
-  if (ca.loading) return <div className="empty">загрузка pki…</div>
-  if (ca.error) return <div className="empty form-error">{ca.error}</div>
-
-  const initialised = ca.data.initialised
+  const nodes = mesh.nodes.filter((n) => n.approval === 'approved')
+  const clients = mesh.clients
 
   return (
     <>
-      <CaCard
-        status={ca.data}
-        canInit={user?.role === 'admin'}
-        busy={busy === 'init'}
-        error={error}
-        onInit={() =>
-          run('init', () => api.post('/pki/init', { common_name: 'Aeolus CA' }))
+      <PageHead
+        title="PKI"
+        sub="Панель — собственный удостоверяющий центр. Отзыв доходит до узла с новым CRL сразу."
+        actions={
+          <>
+            <button className="btn" type="button" onClick={() => authorizedDownload('/pki/ca.crt', 'ca.crt').catch(toast.error)}>
+              <Icon name="download" size={15} />
+              ca.crt
+            </button>
+            <button className="btn" type="button" onClick={() => authorizedDownload('/pki/crl.pem', 'crl.pem').catch(toast.error)}>
+              <Icon name="download" size={15} />
+              crl.pem
+            </button>
+          </>
         }
       />
 
-      {initialised && (
-        <>
-          {error && <div className="form-error">{error}</div>}
+      <div className="tiles">
+        <div className="panel tile">
+          <span className="lbl">CA</span>
+          <span className="value mono" style={{ fontSize: 18 }}>
+            {status.common_name}
+          </span>
+          <span className="hint">
+            <Life notAfter={status.not_after} />
+          </span>
+        </div>
+        <div className="panel tile">
+          <span className="lbl">Выпущено</span>
+          <span className="value">{status.issued_certificates}</span>
+          <span className="hint">
+            клиентов {status.clients_with_cert} · узлов {status.nodes_with_cert}
+          </span>
+        </div>
+        <div className="panel tile">
+          <span className="lbl">Отозвано</span>
+          <span className={`value${status.revoked_clients ? ' err-text' : ''}`}>{status.revoked_clients}</span>
+          <span className="hint">CRL №{status.crl_number}</span>
+        </div>
+      </div>
 
-          <div className="section-title dim">серверные сертификаты узлов</div>
-          <div className="row pki head">
-            <span />
-            <span className="dim">узел</span>
-            <span className="dim">serial</span>
-            <span className="dim">осталось</span>
-            <span />
-          </div>
-          {(nodes.data ?? []).map((node) => (
-            <div className="row pki" key={node.id}>
-              <span className={`dot ${node.server_cert_serial ? 'online' : 'unknown'}`} />
-              <span>
-                <span className="name">{node.name}</span>
-                <div className="sub">{node.address}</div>
-              </span>
-              <span className="muted">{node.server_cert_serial ?? '—'}</span>
-              <span>
-                <CertLife notAfter={node.server_cert_not_after} />
-              </span>
-              <span className="right actions">
-                {canEdit && (
-                  <button
-                    className="btn"
-                    disabled={busy === node.id}
-                    onClick={() =>
-                      run(node.id, () =>
-                        api.post(`/pki/nodes/${node.id}/certificate`),
-                      )
-                    }
-                  >
-                    {node.server_cert_serial ? 'перевыпустить' : 'выпустить'}
-                  </button>
-                )}
-              </span>
-            </div>
-          ))}
-
-          <div className="section-title dim">клиентские сертификаты</div>
-          <div className="row pki head">
-            <span />
-            <span className="dim">клиент</span>
-            <span className="dim">serial</span>
-            <span className="dim">осталось</span>
-            <span />
-          </div>
-          {(clients.data ?? []).length === 0 && (
-            <div className="empty">клиентов ещё нет</div>
-          )}
-          {(clients.data ?? []).map((client) => (
-            <div className="row pki" key={client.id}>
-              <span
-                className={`dot ${
-                  client.status === 'revoked'
-                    ? 'error'
-                    : client.cert_serial
-                      ? 'online'
-                      : 'unknown'
-                }`}
-              />
-              <span>
-                <span className="name">{client.common_name}</span>
-                <div className="sub">
-                  {client.status === 'revoked' ? 'сертификат отозван' : client.status}
-                </div>
-              </span>
-              <span className="muted">{client.cert_serial ?? '—'}</span>
-              <span>
-                {client.status === 'revoked' ? (
-                  <span className="sub err">отозван</span>
-                ) : (
-                  <CertLife notAfter={client.cert_not_after} />
-                )}
-              </span>
-              <span className="right actions">
-                {canEdit && client.status !== 'revoked' && (
-                  <>
-                    <button
-                      className="btn"
-                      disabled={busy === client.id}
-                      onClick={() =>
-                        run(client.id, () =>
-                          api.post(`/pki/clients/${client.id}/certificate`),
-                        )
-                      }
-                    >
-                      {client.cert_serial ? 'перевыпустить' : 'выпустить'}
-                    </button>
-                    {client.cert_serial && (
-                      <ConfirmButton
-                        label="отозвать"
-                        armedLabel="точно отозвать?"
-                        title={`Отозвать сертификат ${client.common_name}`}
-                        onConfirm={() =>
-                          run(client.id, () =>
-                            api.post(`/pki/clients/${client.id}/revoke`),
-                          )
+      <section className="panel" style={{ overflow: 'hidden' }} aria-label="Серверные сертификаты">
+        <div className="panel-head panel-pad" style={{ paddingBottom: 8 }}>
+          <h2>Серверные сертификаты узлов</h2>
+        </div>
+        <div className="table-wrap">
+          <table className="table" style={{ minWidth: 600 }}>
+            <thead>
+              <tr>
+                <th>Узел</th>
+                <th>Serial</th>
+                <th>Срок</th>
+                <th>
+                  <span className="sr-only">Действия</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {nodes.map((node) => (
+                <tr key={node.id}>
+                  <td>
+                    <div className="name-cell">
+                      <span className={node.server_cert_serial ? 'dot live' : 'dot warn'} />
+                      <span className="names">
+                        <span className="n">{node.name}</span>
+                        <span className="l">{node.is_hub ? 'сама панель' : node.hostname || node.address}</span>
+                      </span>
+                    </div>
+                  </td>
+                  <td className="mono muted">{node.server_cert_serial ?? '—'}</td>
+                  <td>
+                    <Life notAfter={node.server_cert_not_after} />
+                  </td>
+                  <td className="actions-cell">
+                    {editable && (
+                      <button
+                        className="btn sm"
+                        type="button"
+                        disabled={busy === node.id}
+                        onClick={() =>
+                          run(node.id, () => api.post(`/pki/nodes/${node.id}/certificate`), `Сертификат ${node.name} выпущен`)
                         }
-                      />
+                      >
+                        {node.server_cert_serial ? 'Перевыпустить' : 'Выпустить'}
+                      </button>
                     )}
-                  </>
-                )}
-              </span>
-            </div>
-          ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-          <div className="term-foot">
-            <span className="dim">
-              отзыв вступает в силу на узле только после того, как туда попадёт новый
-              CRL — рассылкой займётся агент anemoi
-            </span>
-          </div>
-        </>
-      )}
+      <section className="panel" style={{ overflow: 'hidden' }} aria-label="Клиентские сертификаты">
+        <div className="panel-head panel-pad" style={{ paddingBottom: 8 }}>
+          <h2>Клиентские сертификаты</h2>
+          <span className="hint">новый клиент получает сертификат сразу в мастере создания</span>
+        </div>
+        <div className="table-wrap">
+          <table className="table" style={{ minWidth: 600 }}>
+            <thead>
+              <tr>
+                <th>Клиент</th>
+                <th>Serial</th>
+                <th>Срок</th>
+                <th>
+                  <span className="sr-only">Действия</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {clients.length === 0 && (
+                <tr>
+                  <td colSpan={4}>
+                    <div className="empty-state">Клиентов ещё нет</div>
+                  </td>
+                </tr>
+              )}
+              {clients.map((client) => {
+                const revoked = client.status === 'revoked'
+                return (
+                  <tr key={client.id}>
+                    <td>
+                      <div className="name-cell">
+                        <span className={revoked ? 'dot err' : client.cert_serial ? 'dot live' : 'dot warn'} />
+                        <span className="names">
+                          <span className="n">{client.common_name}</span>
+                          {client.label && <span className="l">{client.label}</span>}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="mono muted">{client.cert_serial ?? '—'}</td>
+                    <td>
+                      <Life notAfter={client.cert_not_after} revoked={revoked} />
+                    </td>
+                    <td className="actions-cell">
+                      {editable && !revoked && (
+                        <span className="row-wrap" style={{ justifyContent: 'flex-end', gap: 6 }}>
+                          <button
+                            className="btn sm"
+                            type="button"
+                            disabled={busy === client.id}
+                            onClick={() =>
+                              run(
+                                client.id,
+                                () => api.post(`/pki/clients/${client.id}/certificate`),
+                                `Сертификат ${client.common_name} выпущен`,
+                              )
+                            }
+                          >
+                            {client.cert_serial ? 'Перевыпустить' : 'Выпустить'}
+                          </button>
+                          {client.cert_serial && (
+                            <ConfirmButton
+                              className="btn sm danger"
+                              label="Отозвать"
+                              armedLabel="Точно отозвать?"
+                              title={`Отозвать сертификат ${client.common_name}`}
+                              onConfirm={() =>
+                                run(
+                                  client.id,
+                                  () => api.post(`/pki/clients/${client.id}/revoke`),
+                                  `Сертификат ${client.common_name} отозван`,
+                                )
+                              }
+                            />
+                          )}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </>
   )
 }

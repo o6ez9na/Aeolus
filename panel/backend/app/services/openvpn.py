@@ -339,6 +339,51 @@ async def sync_local_crl(session) -> bool:
     return True
 
 
+STATUS_DIR = Path("/run/openvpn")
+
+
+def read_status(path: Path) -> tuple[list[dict], list[dict]]:
+    """The CLIENT LIST and ROUTING TABLE of a server-mode status file.
+
+    Missing or unreadable files read as empty: a listener that is not up has no
+    sessions, which is exactly what the caller should show.
+    """
+    if not path.exists():
+        return [], []
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return [], []
+
+    clients: list[dict] = []
+    routes: list[dict] = []
+    section = ""
+    for line in lines:
+        if line.startswith("OpenVPN CLIENT LIST"):
+            section = "clients"
+            continue
+        if line.startswith("ROUTING TABLE"):
+            section = "routes"
+            continue
+        if line.startswith("GLOBAL STATS") or line == "END":
+            section = ""
+            continue
+        parts = line.split(",")
+        if section == "clients" and len(parts) >= 5 and parts[0] != "Common Name":
+            clients.append(
+                {
+                    "common_name": parts[0],
+                    "real_address": parts[1],
+                    "rx_bytes": int(parts[2]) if parts[2].isdigit() else 0,
+                    "tx_bytes": int(parts[3]) if parts[3].isdigit() else 0,
+                    "connected_since": parts[4],
+                }
+            )
+        elif section == "routes" and len(parts) >= 2 and parts[0] != "Virtual Address":
+            routes.append({"network": parts[0], "common_name": parts[1]})
+    return clients, routes
+
+
 def transit_sessions() -> set[str]:
     """Node names the hub currently holds a transit tunnel with.
 
@@ -346,28 +391,42 @@ def transit_sessions() -> set[str]:
     collapsed still showed up green: the agent was fine, the tunnel was not.
     The hub knows better — a node either has a session here or it does not.
     """
-    path = Path("/run/openvpn/status-transit.log")
-    if not path.exists():
-        return set()
+    clients, _ = read_status(STATUS_DIR / "status-transit.log")
+    return {entry["common_name"] for entry in clients}
 
-    names: set[str] = set()
-    section = ""
-    try:
-        lines = path.read_text().splitlines()
-    except OSError:
-        return set()
 
-    for line in lines:
-        if line.startswith("OpenVPN CLIENT LIST"):
-            section = "clients"
-            continue
-        if line.startswith("ROUTING TABLE") or line.startswith("GLOBAL STATS"):
-            section = ""
-            continue
-        parts = line.split(",")
-        if section == "clients" and len(parts) >= 5 and parts[0] != "Common Name":
-            names.add(parts[0])
-    return names
+def transit_routes() -> dict[str, list[str]]:
+    """What the transit listener will route into each node's tunnel, by node name.
+
+    This is OpenVPN's own view, built from the iroutes it actually accepted, so
+    it is the place to check whether a node's LAN — or the default route for an
+    exit — really leads into that node.
+    """
+    _, routes = read_status(STATUS_DIR / "status-transit.log")
+    table: dict[str, list[str]] = {}
+    for route in routes:
+        table.setdefault(route["common_name"], []).append(route["network"])
+    return table
+
+
+def client_sessions() -> dict[str, dict]:
+    """Live client sessions on the hub, by common name, from both listeners.
+
+    The agent forwards the same numbers every few seconds, but reading the
+    files directly is what lets the map tell a phone that connected a moment
+    ago from one that left a minute ago.
+    """
+    sessions: dict[str, dict] = {}
+    for proto, name in (("udp", "status.log"), ("tcp", "status-tcp.log")):
+        clients, routes = read_status(STATUS_DIR / name)
+        virtual = {route["common_name"]: route["network"] for route in routes}
+        for entry in clients:
+            sessions[entry["common_name"]] = {
+                **entry,
+                "proto": proto,
+                "virtual_address": virtual.get(entry["common_name"], ""),
+            }
+    return sessions
 
 
 async def sync_routing_plan(session) -> bool:

@@ -8,13 +8,21 @@ import { useEffect, useRef, useState } from 'react'
  * dialogs on a page, and a suppressed confirm() returns without asking, which
  * would silently turn deletion into a single click.
  */
-export function ConfirmButton({ onConfirm, label = '✕', armedLabel = 'точно?', title }) {
+export function ConfirmButton({
+  onConfirm,
+  label = 'Удалить',
+  armedLabel = 'Точно?',
+  title,
+  className = 'btn sm danger',
+  disabled,
+}) {
   const [armed, setArmed] = useState(false)
   const timer = useRef(null)
 
   useEffect(() => () => clearTimeout(timer.current), [])
 
-  function handleClick() {
+  function handleClick(event) {
+    event.stopPropagation()
     if (!armed) {
       setArmed(true)
       timer.current = setTimeout(() => setArmed(false), 4000)
@@ -28,11 +36,12 @@ export function ConfirmButton({ onConfirm, label = '✕', armedLabel = 'точн
   return (
     <button
       type="button"
-      className={armed ? 'btn danger' : 'btn ghost'}
+      className={`${className}${armed ? ' armed' : ''}`}
       onClick={handleClick}
       onBlur={() => setArmed(false)}
       title={title}
-      aria-label={armed ? `${title} — подтвердить` : title}
+      disabled={disabled}
+      aria-label={armed ? `${title ?? label} — подтвердить` : (title ?? label)}
     >
       {armed ? armedLabel : label}
     </button>

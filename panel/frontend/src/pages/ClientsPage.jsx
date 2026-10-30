@@ -8,7 +8,6 @@ import {
   ClientInspector,
   expiryFrom,
   generatePassword,
-  holdCredentials,
   importHandout,
 } from '../components/ClientInspector'
 import { GroupEditor } from '../components/GroupEditor'
@@ -105,7 +104,6 @@ function NewClient({ onClose, onCreated, initialGroup }) {
         expires_at: term === 'never' ? null : expiryFrom(term),
         import_password: password,
       })
-      holdCredentials(client.id, { username: client.common_name, password })
       if (exit && !groupExit) {
         const grant = client.access.find((g) => g.node_id === exit)
         if (grant) await api.post(`/ccd/${grant.grant_id}/exit`, { is_exit: true })
@@ -301,7 +299,7 @@ function NewClient({ onClose, onCreated, initialGroup }) {
           <span className="hint">
             {password.length < 8
               ? 'Пароль короче 8 символов.'
-              : 'После создания панель хранит лишь хеш: скопируй сейчас или со страницы клиента.'}
+              : 'Он же будет виден на странице клиента.'}
           </span>
         </div>
 

@@ -211,7 +211,6 @@ class ClientImportPassword(BaseModel):
 
 
 class ClientImportCredentials(BaseModel):
-    """Returned once: the panel keeps only a hash of the password."""
 
     username: str
     password: str
@@ -224,8 +223,8 @@ class ClientCreate(BaseModel):
     traffic_limit_bytes: int | None = Field(default=None, ge=0)
     node_ids: list[uuid.UUID] = []
     group_id: uuid.UUID | None = None
-    # Lets the subscriber import the profile into OpenVPN Connect from the start;
-    # the form generates it, so the operator has it before the client exists.
+    # For importing the profile into OpenVPN Connect. The form generates one so
+    # the operator sees it before the client exists; omitted, the panel does.
     import_password: str | None = Field(default=None, min_length=8, max_length=128)
 
 

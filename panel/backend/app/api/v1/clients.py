@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, OperatorUser, SessionDep
-from app.core.crypto import SecretUnreadableError
+from app.core.crypto import SecretUnreadableError, decrypt_secret, encrypt_secret
 from app.core.security import generate_password, hash_password
 from app.models.node import (
     Client,
@@ -58,8 +58,13 @@ def _serialize(client: Client, sessions: dict[str, dict] | None = None) -> Clien
         data.tunnel_address = openvpn.static_address("udp", client.tunnel_host)
     exit_grant = next((g for g in client.grants if g.is_exit), None)
     data.exit_node_id = exit_grant.node_id if exit_grant else None
-    data.import_enabled = client.import_password_hash is not None
+    data.import_enabled = client.import_password_enc is not None
     return data
+
+
+def _set_import_password(client: Client, password: str) -> None:
+    client.import_password_hash = hash_password(password)
+    client.import_password_enc = encrypt_secret(password)
 
 
 async def _load(session: SessionDep, client_id: uuid.UUID) -> Client:
@@ -124,8 +129,7 @@ async def create_client(
         traffic_limit_bytes=body.traffic_limit_bytes,
         created_by_id=user.id,
     )
-    if body.import_password is not None:
-        client.import_password_hash = hash_password(body.import_password)
+    _set_import_password(client, body.import_password or generate_password())
     client.grants = [ClientNodeGrant(node_id=node_id) for node_id in body.node_ids]
     group = await _group(session, body.group_id)
     if group is not None:
@@ -156,7 +160,6 @@ async def create_client(
             "node_ids": body.node_ids,
             "group": group.name if group else None,
             "expires_at": body.expires_at,
-            "import_enabled": body.import_password is not None,
         },
     )
     await openvpn.sync_routing_plan(session)
@@ -305,7 +308,7 @@ async def set_import_password(
     """Let the subscriber import the profile into OpenVPN Connect by password.
 
     Setting a new one replaces the old, so this is also how a leaked password
-    is changed. The password is shown once; only its hash is stored.
+    is changed.
     """
     client = await _load(session, client_id)
     if client.cert_pem is None or client.revoked_at is not None:
@@ -313,7 +316,7 @@ async def set_import_password(
             status.HTTP_409_CONFLICT, "у клиента нет действующего сертификата, профиль не собрать"
         )
     password = body.password or generate_password()
-    client.import_password_hash = hash_password(password)
+    _set_import_password(client, password)
     await audit.record(
         session,
         "client.import_enabled",
@@ -328,12 +331,28 @@ async def set_import_password(
     return ClientImportCredentials(username=client.common_name, password=password)
 
 
+@router.get("/{client_id}/import-password", response_model=ClientImportCredentials)
+async def get_import_password(
+    client_id: uuid.UUID, session: SessionDep, _: OperatorUser
+) -> ClientImportCredentials:
+    """The current password, for the operators who can download the profile anyway."""
+    client = await _load(session, client_id)
+    if client.import_password_enc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "вход по паролю выключен")
+    try:
+        password = decrypt_secret(client.import_password_enc)
+    except SecretUnreadableError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from None
+    return ClientImportCredentials(username=client.common_name, password=password)
+
+
 @router.delete("/{client_id}/import-password", status_code=status.HTTP_204_NO_CONTENT)
 async def disable_import(
     client_id: uuid.UUID, request: Request, session: SessionDep, user: OperatorUser
 ) -> None:
     client = await _load(session, client_id)
     client.import_password_hash = None
+    client.import_password_enc = None
     await audit.record(
         session,
         "client.import_disabled",

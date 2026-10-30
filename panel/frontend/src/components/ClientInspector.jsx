@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { apiText } from '../api/client'
+import { api, apiText } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { daysUntil, formatAgo, formatBytes, formatDate, formatSince } from '../lib/format'
 import { useMesh } from '../lib/mesh'
@@ -47,14 +47,6 @@ export function importHandout(username, password) {
   return `Адрес: ${window.location.host}\nЛогин: ${username}\nПароль: ${password}`
 }
 
-// Credentials set in the new-client form, kept until the operator dismisses
-// them so the client's page can show them once more right after it opens.
-const freshCredentials = new Map()
-
-export function holdCredentials(clientId, credentials) {
-  freshCredentials.set(clientId, credentials)
-}
-
 function CcdPreview({ client }) {
   const [text, setText] = useState(null)
   const [error, setError] = useState(null)
@@ -84,9 +76,24 @@ function CcdPreview({ client }) {
 function ProfileImport({ client, editable }) {
   const mesh = useMesh()
   const [busy, setBusy] = useState(false)
-  // Only ever held right after issuing: the panel keeps a hash, not the password.
-  const [issued, setIssued] = useState(() => freshCredentials.get(client.id) ?? null)
+  const [issued, setIssued] = useState(null)
   const host = window.location.host
+
+  // Operators see the current password; viewers only that import is on.
+  useEffect(() => {
+    if (!editable || !client.import_enabled) {
+      setIssued(null)
+      return
+    }
+    let live = true
+    api
+      .get(`/clients/${client.id}/import-password`)
+      .then((creds) => live && setIssued(creds))
+      .catch(() => live && setIssued(null))
+    return () => {
+      live = false
+    }
+  }, [client.id, client.import_enabled, editable])
 
   async function act(fn) {
     setBusy(true)
@@ -101,34 +108,14 @@ function ProfileImport({ client, editable }) {
 
   const issue = () => act(async () => setIssued(await mesh.issueImportPassword(client)))
   const handout = issued && importHandout(issued.username, issued.password)
-  const dismiss = () => {
-    freshCredentials.delete(client.id)
-    setIssued(null)
-  }
 
   return (
     <div className="stack" style={{ gap: 8 }}>
       <span className="lbl">Вход в OpenVPN Connect</span>
       {issued ? (
-        <>
-          <pre className="code wrap" style={{ fontSize: 12.5 }}>
-            {handout}
-          </pre>
-          <div className="row-wrap">
-            <button
-              className="btn sm"
-              type="button"
-              onClick={() => void navigator.clipboard?.writeText(handout)}
-            >
-              <Icon name="copy" size={14} />
-              Скопировать
-            </button>
-            <button className="btn sm ghost" type="button" onClick={dismiss}>
-              Готово
-            </button>
-          </div>
-          <span className="hint warn-text">Пароль виден только сейчас: панель хранит лишь его хеш.</span>
-        </>
+        <pre className="code wrap" style={{ fontSize: 12.5 }}>
+          {handout}
+        </pre>
       ) : client.import_enabled ? (
         <span className="hint">
           Включён: логин <span className="mono">{client.common_name}</span>, адрес{' '}
@@ -140,8 +127,18 @@ function ProfileImport({ client, editable }) {
           ключом внутри, поэтому пароль даёт тот же доступ, что и файл.
         </span>
       )}
-      {editable && !issued && (
+      {editable && (
         <div className="row-wrap">
+          {issued && (
+            <button
+              className="btn sm"
+              type="button"
+              onClick={() => void navigator.clipboard?.writeText(handout)}
+            >
+              <Icon name="copy" size={14} />
+              Скопировать
+            </button>
+          )}
           <button className="btn sm" type="button" disabled={busy} onClick={() => void issue()}>
             {client.import_enabled ? 'Новый пароль' : 'Выдать пароль'}
           </button>

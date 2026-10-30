@@ -241,6 +241,10 @@ class Client(Base, UUIDMixin, TimestampMixin):
     # profile it unlocks carries the private key, so this guards the same thing
     # the downloaded file does.
     import_password_hash: Mapped[str | None] = mapped_column(String(255))
+    # The same password encrypted like the private keys, so the operator can see
+    # it on the client's page: it unlocks nothing the panel does not already hand
+    # them as the .ovpn.
+    import_password_enc: Mapped[str | None] = mapped_column(Text)
 
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")

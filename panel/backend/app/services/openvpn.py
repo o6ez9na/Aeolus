@@ -36,6 +36,20 @@ def static_address(proto: str, host: int) -> str:
     return str(network.network_address + host)
 
 
+def client_dns(node: Node) -> list[str]:
+    """DNS servers this hub pushes, the operator's own or the panel default."""
+    return node.client_dns or [settings.vpn_dns]
+
+
+def _dns_push_lines(servers: list[str]) -> str:
+    # OpenVPN takes IPv6 resolvers under their own option name; a v6 address
+    # given as plain DNS is ignored by most clients.
+    return "\n".join(
+        f'push "dhcp-option {"DNS6" if ":" in server else "DNS"} {server}"'
+        for server in servers
+    )
+
+
 def render_server_config(node: Node, *, proto: str | None = None, port: int | None = None) -> str:
     """Server config for one listener of a node. Certificates live in siblings."""
     proto = proto or node.openvpn_proto
@@ -60,7 +74,9 @@ ifconfig-pool {pool_start} {pool_end} {settings.vpn_netmask}
 # No global redirect-gateway: whether a client's default route comes here is a
 # per-client decision, pushed from its ccd file. Sending it to everyone would
 # blackhole the clients that are only allowed to reach a couple of subnets.
-push "dhcp-option DNS {settings.vpn_dns}"
+# Resolvers are set on the hub's page; one behind a LAN only answers clients
+# that have a route to that LAN.
+{_dns_push_lines(client_dns(node))}
 
 ca ca.crt
 cert server.crt

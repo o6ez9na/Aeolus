@@ -1,3 +1,4 @@
+import ipaddress
 import uuid
 from datetime import datetime
 
@@ -35,6 +36,23 @@ class NodeUpdate(BaseModel):
     bandwidth_capacity_mbps: int | None = Field(default=None, ge=1)
     is_enabled: bool | None = None
     transit_obfuscated: bool | None = None
+    # Hub only. Sent as null or [] to go back to the panel-wide default.
+    client_dns: list[str] | None = Field(default=None, max_length=4)
+
+    @field_validator("client_dns")
+    @classmethod
+    def _dns_are_addresses(cls, value: list[str] | None) -> list[str] | None:
+        if not value:
+            return None
+        servers: list[str] = []
+        for raw in value:
+            try:
+                address = str(ipaddress.ip_address(raw.strip()))
+            except ValueError:
+                raise ValueError(f"{raw!r} is not an IP address") from None
+            if address not in servers:
+                servers.append(address)
+        return servers
 
 
 class NodeRead(NodeBase):
@@ -74,12 +92,15 @@ class NodeRead(NodeBase):
     # How this node reaches the hub, as opposed to the client listener fields
     # above, which only the hub itself still uses.
     transit_transport: str = ""
+    # Empty means the hub pushes client_dns_default instead.
+    client_dns: list[str] = []
+    client_dns_default: list[str] = []
 
-    @field_validator("subnets", mode="before")
+    @field_validator("subnets", "client_dns", mode="before")
     @classmethod
-    def _no_subnets_is_empty(cls, value: list[str] | None) -> list[str]:
-        # NULL in the column means "never announced any", which the UI renders
-        # the same way as an empty list.
+    def _null_list_is_empty(cls, value: list[str] | None) -> list[str]:
+        # NULL in the column means "never set", which the UI renders the same
+        # way as an empty list.
         return value or []
 
 

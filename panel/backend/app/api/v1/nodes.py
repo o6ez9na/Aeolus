@@ -110,6 +110,8 @@ def _read(node: Node, connected: set[str]) -> NodeRead:
         if node.transit_obfuscated
         else f"{settings.vpn_transit_proto}/{settings.vpn_transit_port}"
     )
+    if node.is_hub:
+        data.client_dns_default = [settings.vpn_dns]
     return data
 
 
@@ -137,6 +139,9 @@ async def update_node(
 ) -> NodeRead:
     node = await _get_node(session, node_id)
     changes = body.model_dump(exclude_unset=True)
+    if "client_dns" in changes and not node.is_hub:
+        # Only the hub runs the client listener, so nothing would push them.
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "DNS for clients is set on the hub")
     for field, value in changes.items():
         setattr(node, field, value)
 

@@ -119,6 +119,11 @@ class Node(Base, UUIDMixin, TimestampMixin):
     # goes silent; TCP gives those clients a way through.
     tcp_port: Mapped[int | None] = mapped_column(Integer)
 
+    # DNS servers the hub pushes to every client, in order. NULL falls back to
+    # the panel-wide default. Only the hub faces clients, so on any other node
+    # the column stays empty.
+    client_dns: Mapped[list[str] | None] = mapped_column(JSON)
+
     role: Mapped[NodeRole] = mapped_column(
         Enum(NodeRole, name="node_role"), default=NodeRole.slave
     )

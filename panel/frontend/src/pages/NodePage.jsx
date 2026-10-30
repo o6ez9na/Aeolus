@@ -214,6 +214,65 @@ function MiniMap({ node, clients, hub }) {
   )
 }
 
+/** Resolvers the hub hands every client along with the tunnel. */
+function ClientDns({ node, editable }) {
+  const mesh = useMesh()
+  const saved = node.client_dns.join(', ')
+  const [draft, setDraft] = useState(saved)
+  const [busy, setBusy] = useState(false)
+  const servers = draft.split(/[\s,;]+/).filter(Boolean)
+  const fallback = node.client_dns_default.join(', ')
+
+  const save = async () => {
+    setBusy(true)
+    try {
+      const updated = await mesh.updateNode(
+        node,
+        { client_dns: servers },
+        `DNS для клиентов: ${servers.join(', ') || fallback}. OpenVPN перезапустится, клиенты переподключатся`,
+      )
+      setDraft(updated.client_dns.join(', '))
+    } catch {
+      // reported by the mesh
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="panel panel-pad stack" aria-label="DNS для клиентов">
+      <h2 style={{ fontSize: 15 }}>DNS для клиентов</h2>
+      <form
+        className="row-wrap"
+        style={{ flexWrap: 'nowrap' }}
+        onSubmit={(event) => {
+          event.preventDefault()
+          void save()
+        }}
+      >
+        <input
+          className="input mono"
+          style={{ height: 34 }}
+          placeholder={fallback}
+          aria-label="Адреса DNS-серверов"
+          value={draft}
+          disabled={!editable}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        {editable && (
+          <button className="btn sm primary" type="submit" disabled={busy || servers.join(', ') === saved}>
+            Сохранить
+          </button>
+        )}
+      </form>
+      <span className="hint">
+        До четырёх адресов через запятую, по порядку. Пусто — {fallback}. Сервер в домашней сети
+        ответит только клиентам, у которых есть маршрут в эту сеть.
+      </span>
+    </section>
+  )
+}
+
 function Events({ nodeId }) {
   const log = useResource(`/audit?target_id=${nodeId}&limit=8`, { pollMs: 30000 })
   const items = log.data?.items ?? []
@@ -501,6 +560,8 @@ export function NodePage() {
               </span>
             )}
           </section>
+
+          {node.is_hub && <ClientDns node={node} editable={editable} />}
 
           {!node.is_hub && (
             <section className="panel panel-pad stack" aria-label="Транзит">

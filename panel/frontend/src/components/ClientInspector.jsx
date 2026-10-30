@@ -35,6 +35,26 @@ export function expiryFrom(choice, base) {
   return start.toISOString()
 }
 
+// Same alphabet as the backend: no 0/O, 1/l/I, since it is typed into a phone.
+const PASSWORD_ALPHABET = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+
+export function generatePassword(length = 14) {
+  const values = crypto.getRandomValues(new Uint32Array(length))
+  return Array.from(values, (v) => PASSWORD_ALPHABET[v % PASSWORD_ALPHABET.length]).join('')
+}
+
+export function importHandout(username, password) {
+  return `Адрес: ${window.location.host}\nЛогин: ${username}\nПароль: ${password}`
+}
+
+// Credentials set in the new-client form, kept until the operator dismisses
+// them so the client's page can show them once more right after it opens.
+const freshCredentials = new Map()
+
+export function holdCredentials(clientId, credentials) {
+  freshCredentials.set(clientId, credentials)
+}
+
 function CcdPreview({ client }) {
   const [text, setText] = useState(null)
   const [error, setError] = useState(null)
@@ -65,7 +85,7 @@ function ProfileImport({ client, editable }) {
   const mesh = useMesh()
   const [busy, setBusy] = useState(false)
   // Only ever held right after issuing: the panel keeps a hash, not the password.
-  const [issued, setIssued] = useState(null)
+  const [issued, setIssued] = useState(() => freshCredentials.get(client.id) ?? null)
   const host = window.location.host
 
   async function act(fn) {
@@ -80,7 +100,11 @@ function ProfileImport({ client, editable }) {
   }
 
   const issue = () => act(async () => setIssued(await mesh.issueImportPassword(client)))
-  const handout = issued && `Адрес: ${host}\nЛогин: ${issued.username}\nПароль: ${issued.password}`
+  const handout = issued && importHandout(issued.username, issued.password)
+  const dismiss = () => {
+    freshCredentials.delete(client.id)
+    setIssued(null)
+  }
 
   return (
     <div className="stack" style={{ gap: 8 }}>
@@ -99,7 +123,7 @@ function ProfileImport({ client, editable }) {
               <Icon name="copy" size={14} />
               Скопировать
             </button>
-            <button className="btn sm ghost" type="button" onClick={() => setIssued(null)}>
+            <button className="btn sm ghost" type="button" onClick={dismiss}>
               Готово
             </button>
           </div>

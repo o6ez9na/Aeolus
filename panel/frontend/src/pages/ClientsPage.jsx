@@ -4,7 +4,13 @@ import { useSearchParams } from 'react-router-dom'
 import { authorizedDownload } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { PageHead } from '../components/AppShell'
-import { ClientInspector, expiryFrom } from '../components/ClientInspector'
+import {
+  ClientInspector,
+  expiryFrom,
+  generatePassword,
+  holdCredentials,
+  importHandout,
+} from '../components/ClientInspector'
 import { GroupEditor } from '../components/GroupEditor'
 import { Icon } from '../components/Icon'
 import { Drawer } from '../components/Overlay'
@@ -74,6 +80,7 @@ function NewClient({ onClose, onCreated, initialGroup }) {
   const [exit, setExit] = useState(null)
   const [term, setTerm] = useState('never')
   const [issue, setIssue] = useState(true)
+  const [password, setPassword] = useState(generatePassword)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
@@ -96,7 +103,9 @@ function NewClient({ onClose, onCreated, initialGroup }) {
         node_ids: nodeIds.filter((id) => !fromGroup.has(id)),
         group_id: group?.id ?? null,
         expires_at: term === 'never' ? null : expiryFrom(term),
+        import_password: password,
       })
+      holdCredentials(client.id, { username: client.common_name, password })
       if (exit && !groupExit) {
         const grant = client.access.find((g) => g.node_id === exit)
         if (grant) await api.post(`/ccd/${grant.grant_id}/exit`, { is_exit: true })
@@ -115,7 +124,7 @@ function NewClient({ onClose, onCreated, initialGroup }) {
     }
   }
 
-  const valid = /^[a-zA-Z0-9_.-]+$/.test(name.trim())
+  const valid = /^[a-zA-Z0-9_.-]+$/.test(name.trim()) && password.length >= 8
 
   return (
     <Drawer title="Новый клиент" onClose={onClose}>
@@ -256,6 +265,44 @@ function NewClient({ onClose, onCreated, initialGroup }) {
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="stack" style={{ gap: 8 }}>
+          <span className="lbl">Вход в OpenVPN Connect</span>
+          <pre className="code wrap" style={{ fontSize: 12.5 }}>
+            {importHandout(name.trim() || '—', password)}
+          </pre>
+          <div className="row-wrap">
+            <input
+              className="input mono"
+              style={{ flex: 1, minWidth: 160 }}
+              aria-label="Пароль для OpenVPN Connect"
+              minLength={8}
+              maxLength={128}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+            <button
+              className="btn sm"
+              type="button"
+              onClick={() => setPassword(generatePassword())}
+            >
+              Другой
+            </button>
+            <button
+              className="btn sm"
+              type="button"
+              onClick={() => void navigator.clipboard?.writeText(importHandout(name.trim(), password))}
+            >
+              <Icon name="copy" size={14} />
+              Скопировать
+            </button>
+          </div>
+          <span className="hint">
+            {password.length < 8
+              ? 'Пароль короче 8 символов.'
+              : 'После создания панель хранит лишь хеш: скопируй сейчас или со страницы клиента.'}
+          </span>
         </div>
 
         <div className="bleed">

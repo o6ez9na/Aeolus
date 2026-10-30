@@ -124,6 +124,8 @@ async def create_client(
         traffic_limit_bytes=body.traffic_limit_bytes,
         created_by_id=user.id,
     )
+    if body.import_password is not None:
+        client.import_password_hash = hash_password(body.import_password)
     client.grants = [ClientNodeGrant(node_id=node_id) for node_id in body.node_ids]
     group = await _group(session, body.group_id)
     if group is not None:
@@ -154,6 +156,7 @@ async def create_client(
             "node_ids": body.node_ids,
             "group": group.name if group else None,
             "expires_at": body.expires_at,
+            "import_enabled": body.import_password is not None,
         },
     )
     await openvpn.sync_routing_plan(session)

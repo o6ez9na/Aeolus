@@ -143,8 +143,42 @@ apply_plan() {
         echo "routing plan rejected, keeping the previous rules" >&2
     fi
 }
+# A node's routes (its LANs, and 0.0.0.0/0 when it is an exit) live in its
+# ccd-transit entry, and OpenVPN reads that entry only when the node connects.
+# Only the hub knows when a new entry is in place, so the hub reconnects the
+# node: once the file changes, drop the node's session over the management
+# interface and the node dials straight back in, picking up the new routes.
+TRANSIT_CCD="$CONFIG_DIR/ccd-transit"
+TRANSIT_MANAGEMENT_PORT=7507
+seen_ccd=""
+seen_ccd_pid=""
+reconnect_rerouted_nodes() {
+    [ -f "$CONFIG_DIR/server.conf" ] && [ -n "$openvpn_transit_pid" ] && [ -d "$TRANSIT_CCD" ] || return 0
+    current=$(cd "$TRANSIT_CCD" && for f in *; do
+        [ -f "$f" ] && printf '%s %s\n' "$(sha256sum <"$f" | cut -d" " -f1)" "$f"
+    done)
+    if [ "$seen_ccd_pid" != "$openvpn_transit_pid" ]; then
+        # A listener that just started reads every entry as the nodes connect.
+        seen_ccd_pid=$openvpn_transit_pid
+        seen_ccd=$current
+        return 0
+    fi
+    [ "$current" = "$seen_ccd" ] && return 0
+    printf '%s\n' "$current" | while read -r sum name; do
+        [ -n "$name" ] || continue
+        printf '%s\n' "$seen_ccd" | grep -qxF "$sum $name" && continue
+        echo "routes of node $name changed, reconnecting it"
+        # busybox nc hangs up as soon as its input ends, which can be before
+        # OpenVPN has read the command; hold the line open for the answer.
+        { printf 'kill %s\n' "$name"; sleep 1; printf 'quit\n'; } |
+            nc -w 3 127.0.0.1 "$TRANSIT_MANAGEMENT_PORT" | tr -d '\r' | grep -E "^(SUCCESS|ERROR)" || true
+    done
+    seen_ccd=$current
+}
+
 apply_plan
 apply_node_nat
+reconnect_rerouted_nodes
 
 # The agent rewrites server.conf when the panel changes it and touches the flag.
 # The CRL and ccd are re-read by OpenVPN itself, so only server.conf needs this.
@@ -181,6 +215,7 @@ while true; do
     # a restart to get it.
     apply_plan
     apply_node_nat
+    reconnect_rerouted_nodes
 
     current_flag=$(cat "$RESTART_FLAG" 2>/dev/null || echo "")
     if [ "$current_flag" != "$seen_flag" ]; then

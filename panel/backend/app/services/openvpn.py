@@ -207,20 +207,17 @@ verb 3
 """
 
 
-def render_transit_client_config(node: Node, hub_address: str, *, is_exit: bool = False) -> str:
+def render_transit_client_config(node: Node, hub_address: str) -> str:
     """What a node runs to reach the hub. The node is a client here.
 
-    The hub reads a node's ccd entry only when the node connects, so a node
-    that becomes (or stops being) an exit has to reconnect: the marker line
-    below changes this file with it, which is what makes the agent restart the
-    tunnel.
+    Nothing in it depends on the node's routes: those live in its ccd entry on
+    the hub, and the hub reconnects the node itself when that entry changes.
     """
-    exit_marker = "# выход в интернет: да\n" if is_exit else ""
     if node.transit_obfuscated:
         # The tunnel goes to the local wstunnel container, which carries it to
         # the panel inside an ordinary WebSocket on 443.
         return f"""# Aeolus transit · node {node.name} (через WebSocket)
-{exit_marker}client
+client
 dev tun
 proto tcp-client
 remote {settings.transit_wstunnel_host} {settings.vpn_transit_port} tcp
@@ -250,7 +247,7 @@ verb 3
 
     transit_proto = settings.vpn_transit_proto
     return f"""# Aeolus transit · node {node.name}
-{exit_marker}client
+client
 dev tun
 proto {"tcp-client" if transit_proto == "tcp" else "udp"}
 remote {hub_address} {settings.vpn_transit_port} {transit_proto}

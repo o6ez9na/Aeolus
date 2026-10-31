@@ -340,8 +340,7 @@ async def _build_transit(
     if hub is None or not hub.address:
         # Nothing to dial yet; the node keeps serving whatever it already has.
         return "", {}
-    is_exit = any(n.id == node.id for n in await exits_service.remote_exit_nodes(session))
-    return openvpn.render_transit_client_config(node, hub.address, is_exit=is_exit), {}
+    return openvpn.render_transit_client_config(node, hub.address), {}
 
 
 async def _build_ccd(session: AsyncSession, node: Node, *, proto: str) -> dict[str, str]:

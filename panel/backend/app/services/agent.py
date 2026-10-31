@@ -353,52 +353,92 @@ async def _build_ccd(session: AsyncSession, node: Node, *, proto: str) -> dict[s
             Client.cert_serial.is_not(None)
         )
     )
+    subnets_by_node = await load_subnets_by_node(session) if node.is_hub else {}
+    return {
+        client.common_name: render_client_ccd(
+            node, client, proto=proto, subnets_by_node=subnets_by_node
+        )
+        for client in clients
+    }
+
+
+async def load_subnets_by_node(session: AsyncSession) -> dict:
+    """LANs each live node announces, which is what a grant without a scope opens."""
+    return {
+        other.id: (other.subnets or [])
+        for other in await session.scalars(
+            select(Node).where(
+                Node.approval == NodeApproval.approved, Node.is_enabled.is_(True)
+            )
+        )
+    }
+
+
+def render_client_ccd(
+    node: Node, client: Client, *, proto: str, subnets_by_node: dict
+) -> str:
+    """The ccd entry ``node`` holds for ``client`` on one listener.
+
+    The one place that decides what goes into a client's file: the agent writes
+    it, and the panel's preview shows it, so the two cannot disagree.
+    ``client.grants`` must be loaded.
+    """
+    grant = next((g for g in client.grants if g.node_id == node.id), None)
+    if node.is_hub:
+        # Every client dials the hub — that is the only door there is. Which
+        # nodes it may then use is a routing decision, not a reason to refuse
+        # the connection, and a client with no grants simply reaches nothing
+        # once it is inside.
+        allowed = client.status == ClientStatus.active
+    else:
+        allowed = grant is not None and client.status == ClientStatus.active
 
     # On the hub a client's file describes its whole world: the address it gets,
     # the networks it may reach, and whether its default route comes here.
-    subnets_by_node: dict = {}
-    if node.is_hub:
-        subnets_by_node = {
-            other.id: (other.subnets or [])
-            for other in await session.scalars(
-                select(Node).where(
-                    Node.approval == NodeApproval.approved, Node.is_enabled.is_(True)
-                )
+    default_route = False
+    routes: list[str] = []
+    if node.is_hub and allowed:
+        for held in client.grants:
+            if held.is_exit:
+                default_route = True
+            routes.extend(
+                grant_networks(held.networks, subnets_by_node.get(held.node_id, []))
             )
-        }
 
-    entries: dict[str, str] = {}
-    for client in clients:
-        grant = next((g for g in client.grants if g.node_id == node.id), None)
-        if node.is_hub:
-            # Every client dials the hub — that is the only door there is. Which
-            # nodes it may then use is a routing decision, not a reason to
-            # refuse the connection, and a client with no grants simply reaches
-            # nothing once it is inside.
-            allowed = client.status == ClientStatus.active
-        else:
-            allowed = grant is not None and client.status == ClientStatus.active
+    return ccd_service.render(
+        grant,
+        client.common_name,
+        proto=proto,
+        allowed=allowed,
+        tunnel_host=client.tunnel_host if node.is_hub else None,
+        default_route=default_route,
+        routes=sorted(set(routes)),
+    )
 
-        default_route = False
-        routes: list[str] = []
-        if node.is_hub and allowed:
-            for held in client.grants:
-                if held.is_exit:
-                    default_route = True
-                routes.extend(
-                    grant_networks(held.networks, subnets_by_node.get(held.node_id, []))
-                )
 
-        entries[client.common_name] = ccd_service.render(
-            grant,
-            client.common_name,
-            proto=proto,
-            allowed=allowed,
-            tunnel_host=client.tunnel_host if node.is_hub else None,
-            default_route=default_route,
-            routes=sorted(set(routes)),
-        )
-    return entries
+async def preview_client_ccd(
+    session: AsyncSession,
+    client: Client,
+    *,
+    proto: str = "udp",
+    hub: Node | None = None,
+    subnets_by_node: dict | None = None,
+) -> str:
+    """What OpenVPN actually reads for this client.
+
+    Clients dial only the hub, so the hub's file is the one in force whichever
+    node a grant points at. ``hub`` and ``subnets_by_node`` may be passed in
+    when previewing many clients at once.
+    """
+    if client.cert_serial is None:
+        return "# у клиента ещё нет сертификата — файла на хабе нет\n"
+    if hub is None:
+        hub = await session.scalar(select(Node).where(Node.is_hub.is_(True)))
+    if hub is None:
+        return "# хаб ещё не создан — файла нет\n"
+    if subnets_by_node is None:
+        subnets_by_node = await load_subnets_by_node(session)
+    return render_client_ccd(hub, client, proto=proto, subnets_by_node=subnets_by_node)
 
 
 async def record_status(session: AsyncSession, node: Node, report: dict) -> bool:

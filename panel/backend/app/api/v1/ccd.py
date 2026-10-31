@@ -7,15 +7,26 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, OperatorUser, SessionDep
 from app.core.config import settings
-from app.models.node import ClientGroupGrant, ClientNodeGrant, ClientStatus
+from app.models.node import Client, ClientGroupGrant, ClientNodeGrant, Node
 from app.schemas.ccd import CcdLimits, CcdRead, CcdUpdate, ExitUpdate
-from app.services import audit, ccd, groups, openvpn, routing
+from app.services import agent, audit, ccd, groups, openvpn, routing
 
 router = APIRouter(prefix="/ccd", tags=["ccd"])
 
+# The preview is rendered from all of the client's grants, not just this one.
+_GRANT_OPTIONS = (
+    selectinload(ClientNodeGrant.client).selectinload(Client.grants),
+    selectinload(ClientNodeGrant.node),
+)
 
-def _serialize(grant: ClientNodeGrant) -> CcdRead:
-    allowed = grant.client.status == ClientStatus.active
+
+async def _serialize(
+    session: SessionDep,
+    grant: ClientNodeGrant,
+    *,
+    hub: Node | None = None,
+    subnets_by_node: dict | None = None,
+) -> CcdRead:
     return CcdRead(
         id=grant.id,
         client_id=grant.client_id,
@@ -47,8 +58,10 @@ def _serialize(grant: ClientNodeGrant) -> CcdRead:
         push_options=grant.push_options or [],
         networks=grant.networks,
         group_id=grant.group_id,
-        preview=ccd.render(
-            grant, grant.client.common_name, proto="udp", allowed=allowed
+        # The file the agent writes, built by the same code: clients dial only
+        # the hub, so that is the one in force whichever node this grant is for.
+        preview=await agent.preview_client_ccd(
+            session, grant.client, hub=hub, subnets_by_node=subnets_by_node
         ),
     )
 
@@ -57,9 +70,7 @@ async def _load(session: SessionDep, grant_id: uuid.UUID) -> ClientNodeGrant:
     grant = await session.scalar(
         select(ClientNodeGrant)
         .where(ClientNodeGrant.id == grant_id)
-        .options(
-            selectinload(ClientNodeGrant.client), selectinload(ClientNodeGrant.node)
-        )
+        .options(*_GRANT_OPTIONS)
     )
     if grant is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Grant not found")
@@ -69,12 +80,15 @@ async def _load(session: SessionDep, grant_id: uuid.UUID) -> ClientNodeGrant:
 @router.get("", response_model=list[CcdRead])
 async def list_entries(session: SessionDep, _: CurrentUser) -> list[CcdRead]:
     """Every client-node pair that has a grant, whether customised or not."""
-    grants = await session.scalars(
-        select(ClientNodeGrant).options(
-            selectinload(ClientNodeGrant.client), selectinload(ClientNodeGrant.node)
-        )
-    )
-    entries = [_serialize(grant) for grant in grants]
+    grants = (
+        await session.scalars(select(ClientNodeGrant).options(*_GRANT_OPTIONS))
+    ).all()
+    hub = await session.scalar(select(Node).where(Node.is_hub.is_(True)))
+    subnets_by_node = await agent.load_subnets_by_node(session)
+    entries = [
+        await _serialize(session, grant, hub=hub, subnets_by_node=subnets_by_node)
+        for grant in grants
+    ]
     entries.sort(key=lambda entry: (entry.node_name, entry.client_name))
     return entries
 
@@ -145,7 +159,7 @@ async def update_entry(
             "этот адрес уже закреплён за другим клиентом на этом узле",
         ) from None
 
-    return _serialize(await _load(session, grant_id))
+    return await _serialize(session, await _load(session, grant_id))
 
 
 @router.post("/{grant_id}/exit", response_model=CcdRead)
@@ -210,4 +224,4 @@ async def set_exit(
     await session.flush()
     await openvpn.sync_routing_plan(session)
     await session.commit()
-    return _serialize(await _load(session, grant_id))
+    return await _serialize(session, await _load(session, grant_id))

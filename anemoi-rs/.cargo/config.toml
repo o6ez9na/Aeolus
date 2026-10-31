@@ -1,0 +1,7 @@
+# The MIPS musl targets are tier 3 and default to dynamic linking, unlike the
+# tier-2 musl targets. A router has no libgcc_s to load: link everything in.
+[target.mipsel-unknown-linux-musl]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-self-contained=no"]
+
+[target.mips-unknown-linux-musl]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-self-contained=no"]

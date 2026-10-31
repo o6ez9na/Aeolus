@@ -1,0 +1,32 @@
+[package]
+name = "anemoi"
+version = "0.2.0"
+edition = "2024"
+
+[dependencies]
+log = "0.4.35"
+prost = "0.14.4"
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
+ring = "0.17.14"
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-pki-types = "1.15.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", default-features = false, features = ["rt", "macros", "time", "fs", "signal", "net", "process", "sync"] }
+tonic = { version = "0.14.9", default-features = false, features = ["transport", "codegen", "tls-ring"] }
+tonic-prost = "0.14.9"
+webpki-roots = "1.0.11"
+
+[build-dependencies]
+protox = "0.10.0"
+tonic-prost-build = "0.14.9"
+
+# Routers have a few MB of flash for everything we add: size beats speed here,
+# and the agent spends its life asleep anyway.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

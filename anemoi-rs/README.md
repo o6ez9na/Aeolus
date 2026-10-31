@@ -12,7 +12,7 @@ wstunnel.
 | `aarch64-unknown-linux-musl` | ARM64 Keenetic and OpenWrt routers, ARM boards |
 | `x86_64-unknown-linux-musl` | servers, VMs, x86 OpenWrt |
 
-All static, 2.3–3.0 MB, soft-float on MIPS (routers there have no FPU).
+All static, 2.5–3.5 MB, soft-float on MIPS (routers there have no FPU).
 
 ## Installing a node
 

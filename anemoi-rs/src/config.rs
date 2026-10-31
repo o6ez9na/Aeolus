@@ -34,6 +34,22 @@ pub struct Config {
     pub interval_secs: u64,
     pub restart_flag: PathBuf,
     pub log_level: String,
+
+    /// Run the transit OpenVPN, the WebSocket bridge and the firewall rules
+    /// ourselves (a router), instead of leaving them to the docker containers
+    /// next to us.
+    pub supervise: bool,
+    /// openvpn binary; found in the usual places when empty.
+    pub openvpn_bin: String,
+    /// Name of the transit tunnel device; the firewall zone is bound to it.
+    pub tun_dev: String,
+    /// Host in transit.conf that means "the local wstunnel": docker's
+    /// container name, replaced by our bridge on localhost.
+    pub transit_ws_host: String,
+    /// wstunnel's path prefix on the panel (Caddy routes /transit there).
+    pub transit_path: String,
+    /// Where wstunnel on the panel connects to: the hub's transit listener.
+    pub transit_target: String,
 }
 
 impl Config {
@@ -89,6 +105,15 @@ impl Config {
             interval_secs: get("ANEMOI_INTERVAL", "15").parse().unwrap_or(15).max(1),
             restart_flag: get("ANEMOI_RESTART_FLAG", "/etc/openvpn/aeolus/.restart").into(),
             log_level: get("ANEMOI_LOG_LEVEL", "INFO"),
+            supervise: matches!(
+                get("ANEMOI_SUPERVISE", "").to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            ),
+            openvpn_bin: get("ANEMOI_OPENVPN", ""),
+            tun_dev: get("ANEMOI_TUN_DEV", "aeolus0"),
+            transit_ws_host: get("ANEMOI_TRANSIT_WS_HOST", "wstunnel"),
+            transit_path: get("ANEMOI_TRANSIT_PATH", "transit"),
+            transit_target: get("ANEMOI_TRANSIT_TARGET", "openvpn:1195"),
             panel,
         }
     }

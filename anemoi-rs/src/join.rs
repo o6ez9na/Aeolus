@@ -8,11 +8,9 @@
 
 use std::fs;
 use std::io;
-use std::sync::Arc;
 use std::time::Duration;
 
 use log::{error, info, warn};
-use rustls_pki_types::{CertificateDer, pem::PemObject};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -20,26 +18,12 @@ use crate::config::Config;
 use crate::enrol::Enrolment;
 use crate::{Result, VERSION};
 
-/// HTTP client for the panel API. Public roots are compiled in: plenty of
-/// routers ship no CA bundle at all, and the node must still trust the panel's
-/// Let's Encrypt certificate.
+/// HTTP client for the panel API, trusting what `tls::panel_client_config`
+/// trusts.
 pub fn http_client(cfg: &Config) -> Result<reqwest::Client> {
-    let mut roots = rustls::RootCertStore::empty();
-    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    if let Some(path) = &cfg.panel_ca {
-        for cert in CertificateDer::pem_file_iter(path)? {
-            roots.add(cert?)?;
-        }
-    }
-    let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
-        rustls::crypto::ring::default_provider(),
-    ))
-    .with_safe_default_protocol_versions()?
-    .with_root_certificates(roots)
-    .with_no_client_auth();
-
+    let tls = crate::tls::panel_client_config(cfg)?;
     Ok(reqwest::Client::builder()
-        .use_preconfigured_tls(tls)
+        .use_preconfigured_tls((*tls).clone())
         .timeout(Duration::from_secs(30))
         .user_agent(format!("anemoi/{VERSION}"))
         .build()?)

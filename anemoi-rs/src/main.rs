@@ -8,10 +8,14 @@
 mod apply;
 mod config;
 mod enrol;
+mod firewall;
 mod fsutil;
 mod join;
 mod logger;
 mod status;
+mod supervisor;
+mod tls;
+mod wsbridge;
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -22,13 +26,15 @@ use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity
 use crate::config::Config;
 use crate::enrol::Enrolment;
 use crate::pb::node_agent_client::NodeAgentClient;
+use crate::supervisor::Supervisor;
 
 pub mod pb {
     tonic::include_proto!("aeolus.anemoi.v1");
 }
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+pub type Result<T> = std::result::Result<T, BoxError>;
 
 const USAGE: &str = "usage: anemoi [run | fingerprint | version]
 
@@ -143,6 +149,7 @@ async fn run(mut cfg: Config) -> i32 {
     // a full one.
     let mut revision = String::new();
     let mut reader = status::Reader::default();
+    let mut supervisor = cfg.supervise.then(|| Supervisor::new(cfg.clone()));
 
     loop {
         if client.is_none() {
@@ -151,16 +158,40 @@ async fn run(mut cfg: Config) -> i32 {
                 Err(err) => error!("cannot set up the channel to the panel: {err}"),
             }
         }
-        if let Some(stub) = client.as_mut()
-            && let Err(err) = sync_once(&cfg, stub, &mut revision, &mut reader).await
-        {
-            warn!("panel call failed: {err}");
+
+        let mut restart = false;
+        if let Some(stub) = client.as_mut() {
+            match pull_config(&cfg, stub, &mut revision).await {
+                Ok(changed) => restart = changed,
+                Err(err) => warn!("panel call failed: {err}"),
+            }
         }
+        match supervisor.as_mut() {
+            // Also when the panel is unreachable: the tunnel runs on the
+            // config already on disk, and a dead OpenVPN is restarted anyway.
+            Some(supervisor) => supervisor.reconcile(restart).await,
+            None if restart => {
+                if let Err(err) = request_openvpn_restart(&cfg) {
+                    error!("cannot ask for an OpenVPN restart: {err}");
+                }
+            }
+            None => {}
+        }
+        if let Some(stub) = client.as_mut()
+            && let Err(err) = report_status(&cfg, stub, &revision, &mut reader).await
+        {
+            warn!("status report failed: {err}");
+        }
+
         tokio::select! {
-            _ = &mut shutdown => return 0,
+            _ = &mut shutdown => break,
             _ = tokio::time::sleep(interval) => {}
         }
     }
+    if let Some(supervisor) = supervisor.as_mut() {
+        supervisor.shutdown().await;
+    }
+    0
 }
 
 /// A lazily connected channel: a panel that is down now is retried on every
@@ -180,12 +211,13 @@ fn connect(cfg: &Config, enrolment: &Enrolment) -> Result<NodeAgentClient<Channe
     Ok(NodeAgentClient::new(channel))
 }
 
-async fn sync_once(
+/// Fetch the configuration and write it. Returns whether OpenVPN has to be
+/// restarted to pick it up.
+async fn pull_config(
     cfg: &Config,
     stub: &mut NodeAgentClient<Channel>,
     revision: &mut String,
-    reader: &mut status::Reader,
-) -> Result<()> {
+) -> Result<bool> {
     let config = stub
         .get_config(pb::ConfigRequest {
             known_revision: revision.clone(),
@@ -193,14 +225,21 @@ async fn sync_once(
         .await
         .map_err(describe_status)?
         .into_inner();
-    if !config.unchanged {
-        if apply::apply_config(&cfg.config_dir, &cfg.state_dir, &config)? {
-            request_openvpn_restart(cfg)?;
-        }
-        *revision = config.revision.clone();
-        info!("applied configuration revision {revision}");
+    if config.unchanged {
+        return Ok(false);
     }
+    let restart = apply::apply_config(&cfg.config_dir, &cfg.state_dir, &config)?;
+    *revision = config.revision.clone();
+    info!("applied configuration revision {revision}");
+    Ok(restart)
+}
 
+async fn report_status(
+    cfg: &Config,
+    stub: &mut NodeAgentClient<Channel>,
+    revision: &str,
+    reader: &mut status::Reader,
+) -> Result<()> {
     let snapshot = reader.read(cfg.status_path());
     stub.report_status(pb::StatusReport {
         openvpn_running: snapshot.running,
@@ -210,7 +249,7 @@ async fn sync_once(
         bandwidth_mbps: snapshot.bandwidth_mbps,
         sessions: snapshot.sessions,
         agent_version: VERSION.into(),
-        config_revision: revision.clone(),
+        config_revision: revision.to_string(),
     })
     .await
     .map_err(describe_status)?;

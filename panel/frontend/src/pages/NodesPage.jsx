@@ -67,39 +67,106 @@ function PendingCard({ node, editable }) {
   )
 }
 
+const RAW = 'https://raw.githubusercontent.com/o6ez9na/Aeolus/main/scripts'
+
+// What goes into the copied command is typed by hand; keep it to the
+// characters a name, a host or a list of networks can have, so a stray quote
+// or semicolon never ends up in a root shell.
+const only = (value, re) => value.replace(re, '')
+const cleanName = (value) => only(value.trim().toLowerCase(), /[^a-z0-9_.-]/g)
+const cleanHost = (value) => only(value.trim().toLowerCase(), /[^a-z0-9.:[\]-]/g)
+const cleanSubnets = (value) =>
+  value
+    .split(/[\s,]+/)
+    .map((part) => only(part, /[^0-9a-fA-F.:/]/g))
+    .filter(Boolean)
+    .join(',')
+
+// The node talks to the panel's HTTPS name, which is where the browser is
+// when it came by domain. The hub's address is what clients dial and may be a
+// bare IP, which the panel's certificate does not cover.
+function defaultPanelHost(hub) {
+  const here = window.location.hostname
+  const isName = /[a-z]/i.test(here) && here !== 'localhost' && !here.includes(':')
+  return isName ? here : hub?.address || here
+}
+
+const KINDS = [
+  ['router', 'Роутер или Linux'],
+  ['docker', 'Сервер с Docker'],
+]
+
 /**
  * A node joins by itself: the installer announces it and it waits for an
  * operator. So "adding" one is handing over the right command.
  */
 function ConnectNode({ hub, onClose }) {
   const toast = useToast()
+  const [kind, setKind] = useState('router')
+  const [panel, setPanel] = useState(() => defaultPanelHost(hub))
   const [name, setName] = useState('')
   const [subnets, setSubnets] = useState('')
-  const domain = hub?.address || window.location.hostname
-  const env = [
-    `AEOLUS_PANEL_DOMAIN=${domain}`,
-    name.trim() && `AEOLUS_NODE_NAME=${name.trim()}`,
-    subnets.trim() && `AEOLUS_NODE_SUBNETS=${subnets.trim().replace(/\s+/g, '')}`,
-  ]
-    .filter(Boolean)
-    .join(' ')
-  const command = `curl -fsSL https://raw.githubusercontent.com/o6ez9na/Aeolus/main/scripts/install.sh | sudo ${env} bash -s -- node`
+  const host = cleanHost(panel)
+  const node = cleanName(name)
+  const nets = cleanSubnets(subnets)
+
+  let command
+  if (kind === 'router') {
+    const args = [`--panel ${host}`, node && `--name ${node}`, nets && `--subnets ${nets}`]
+      .filter(Boolean)
+      .join(' ')
+    command = `wget -qO- ${RAW}/install-node.sh | sh -s -- ${args}`
+  } else {
+    const env = [
+      `AEOLUS_PANEL_DOMAIN=${host}`,
+      node && `AEOLUS_NODE_NAME=${node}`,
+      nets && `AEOLUS_NODE_SUBNETS=${nets}`,
+    ]
+      .filter(Boolean)
+      .join(' ')
+    command = `curl -fsSL ${RAW}/install.sh | sudo ${env} bash -s -- node`
+  }
 
   return (
     <Drawer title="Подключить узел" onClose={onClose} width={480}>
       <div className="stack-lg">
         <span className="hint">
-          Узлу не нужен ни один входящий порт: он сам звонит панели и ждёт, пока его примут.
+          Узлу не нужен ни один входящий порт: он сам ходит к панели на 443 и ждёт, пока его примут.
         </span>
+        <div className="seg-group fill">
+          {KINDS.map(([value, text]) => (
+            <button
+              key={value}
+              type="button"
+              className={`seg${kind === value ? ' on' : ''}`}
+              aria-pressed={kind === value}
+              onClick={() => setKind(value)}
+            >
+              {text}
+            </button>
+          ))}
+        </div>
+        <span className="hint">
+          {kind === 'router'
+            ? 'OpenWrt, Keenetic с Entware или любой Linux без Docker: агент ставится одним файлом, пакеты, автозапуск и фаервол настраиваются штатными средствами системы.'
+            : 'Сервер, где уже есть или можно поставить Docker: агент и OpenVPN поднимаются контейнерами.'}
+        </span>
+        <label className="field">
+          Адрес панели
+          <input className="input mono" value={panel} onChange={(event) => setPanel(event.target.value)} />
+          <span className="hint">Домен, по которому панель открывается по HTTPS. Узел должен до него достучаться.</span>
+        </label>
         <label className="field">
           Имя узла
           <input
             className="input mono"
-            placeholder="frankfurt-01"
-            pattern="[a-z0-9][a-z0-9_.\-]*"
+            placeholder={kind === 'router' ? 'home-router' : 'frankfurt-01'}
             value={name}
-            onChange={(event) => setName(event.target.value.toLowerCase())}
+            onChange={(event) => setName(event.target.value)}
           />
+          {name && node !== name.trim().toLowerCase() && (
+            <span className="hint">Только латиница, цифры, точка, дефис и подчёркивание: {node || '—'}</span>
+          )}
         </label>
         <label className="field">
           Сети за узлом, через запятую
@@ -110,7 +177,8 @@ function ConnectNode({ hub, onClose }) {
             onChange={(event) => setSubnets(event.target.value)}
           />
           <span className="hint">
-            Не должны пересекаться с пулами клиентов, транзитом и сетями других узлов.
+            Не должны пересекаться с пулами клиентов, транзитом и сетями других узлов. Пусто — узел
+            только выпускает клиентов в интернет.
           </span>
         </label>
         <div className="stack" style={{ gap: 8 }}>
@@ -121,6 +189,7 @@ function ConnectNode({ hub, onClose }) {
           <button
             className="btn"
             type="button"
+            disabled={!host}
             onClick={() =>
               navigator.clipboard
                 .writeText(command)
@@ -131,14 +200,30 @@ function ConnectNode({ hub, onClose }) {
             <Icon name="copy" size={15} />
             Скопировать
           </button>
+          {kind === 'router' && (
+            <span className="hint">
+              Keenetic: сначала Entware и компоненты прошивки «OpenVPN» и «Модули ядра подсистемы
+              Netfilter». Если <code className="mono">wget</code> не умеет HTTPS —{' '}
+              <code className="mono">opkg install wget-ssl</code>.
+            </span>
+          )}
         </div>
         <div className="stack" style={{ gap: 6 }}>
           <span className="lbl">2 · Сверь отпечаток</span>
           <span className="hint">
-            Агент напечатает отпечаток своего ключа. Через несколько секунд заявка появится на этой
+            Установщик напечатает отпечаток ключа узла. Через несколько секунд заявка появится на этой
             странице и на карте — прими её, если строки совпадают.
           </span>
         </div>
+        {kind === 'router' && (
+          <div className="stack" style={{ gap: 6 }}>
+            <span className="lbl">3 · Проверь</span>
+            <span className="hint">
+              <code className="mono">anemoi doctor</code> на узле покажет, что не так, если узел не
+              появился в сети. Удалить — <code className="mono">anemoi uninstall</code>.
+            </span>
+          </div>
+        )}
       </div>
     </Drawer>
   )

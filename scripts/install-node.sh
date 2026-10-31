@@ -90,20 +90,19 @@ fetch() { # fetch <url> <file>
     fi
 }
 
-https_ok() {
-    probe=$(mktemp)
-    if fetch "https://github.com/" "$probe" 2>/dev/null; then rm -f "$probe"; return 0; fi
-    rm -f "$probe"; return 1
-}
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
 
-case "$BASE" in
-    https://*)
-        if ! https_ok; then
-            say "нет HTTPS-загрузчика, ставлю curl / no HTTPS downloader, installing curl"
-            pkg_add curl || die "не смог поставить curl; поставь его и запусти снова / could not install curl; install it and run again"
-        fi
-        ;;
-esac
+# The checksums double as the probe: if this machine's downloader cannot fetch
+# them, it cannot fetch the binary either. Probing a page of its own would
+# test the wrong host (uclient-fetch times out on github.com's front page
+# while release downloads work).
+if ! fetch "$BASE/SHA256SUMS" "$TMP/SHA256SUMS" 2>/dev/null; then
+    command -v curl >/dev/null 2>&1 && die "не скачались контрольные суммы / download failed: $BASE/SHA256SUMS"
+    say "загрузчик не справился, ставлю curl / the downloader failed, installing curl"
+    pkg_add curl || die "не смог поставить curl; поставь его и запусти снова / could not install curl; install it and run again"
+    fetch "$BASE/SHA256SUMS" "$TMP/SHA256SUMS" || die "не скачались контрольные суммы / download failed: $BASE/SHA256SUMS"
+fi
 
 sha256() {
     if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
@@ -120,12 +119,8 @@ fi
 
 # --- fetch and verify ------------------------------------------------------------
 
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT INT TERM
-
 say "загружаю / downloading $BASE/anemoi-$TARGET"
 fetch "$BASE/anemoi-$TARGET" "$TMP/anemoi" || die "не скачался бинарь / download failed: $BASE/anemoi-$TARGET"
-fetch "$BASE/SHA256SUMS" "$TMP/SHA256SUMS" || die "не скачались контрольные суммы / download failed: $BASE/SHA256SUMS"
 
 want=$(awk -v f="anemoi-$TARGET" '$2 == f || $2 == "*" f {print $1}' "$TMP/SHA256SUMS")
 got=$(sha256 "$TMP/anemoi")

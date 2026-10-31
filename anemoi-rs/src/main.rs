@@ -66,6 +66,7 @@ fn main() {
         "install" => install::install(&std::env::args().skip(2).collect::<Vec<_>>()),
         "uninstall" => install::uninstall(&std::env::args().skip(2).collect::<Vec<_>>()),
         "doctor" => install::doctor(),
+        "firewall-apply" => firewall_apply(&cfg),
         "fingerprint" => match Enrolment::new(&cfg.state_dir).fingerprint() {
             Ok(fp) => {
                 println!("{fp}");
@@ -93,6 +94,28 @@ fn main() {
         }
     };
     std::process::exit(code);
+}
+
+/// Put the firewall rules back from what is on disk: for platforms that wipe
+/// them behind our back (Keenetic's netfilter.d hook calls this).
+fn firewall_apply(cfg: &Config) -> i32 {
+    let subnets: Vec<String> = std::fs::read_to_string(cfg.config_dir.join("nat-subnets"))
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect();
+    if subnets.is_empty() {
+        return 0;
+    }
+    match firewall::detect().apply(&subnets, &cfg.tun_dev) {
+        Ok(()) => 0,
+        Err(err) => {
+            eprintln!("firewall: {err}");
+            1
+        }
+    }
 }
 
 fn runtime() -> tokio::runtime::Runtime {

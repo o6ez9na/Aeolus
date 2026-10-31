@@ -84,7 +84,9 @@ pub struct Platform {
 impl Platform {
     pub fn detect() -> Platform {
         let exists = |p: &str| Path::new(p).exists();
-        if exists("/etc/openwrt_release") {
+        // For the rare box detection gets wrong.
+        let forced = std::env::var("ANEMOI_PLATFORM").unwrap_or_default();
+        if forced == "openwrt" || (forced.is_empty() && exists("/etc/openwrt_release")) {
             Platform {
                 kind: Kind::OpenWrt,
                 packages: if exists("/usr/bin/apk") && exists("/etc/apk") {
@@ -151,7 +153,8 @@ impl Platform {
         match self.packages {
             Packages::Apk if self.kind == Kind::OpenWrt => &["openvpn-openssl", "kmod-tun"],
             Packages::Opkg => &["openvpn-openssl", "kmod-tun"],
-            Packages::EntwareOpkg => &["openvpn-openssl"],
+            // Keenetic's own iptables is not reachable from Entware's PATH.
+            Packages::EntwareOpkg => &["openvpn-openssl", "iptables"],
             Packages::Apk | Packages::Apt | Packages::Dnf => &["openvpn", "iptables"],
             Packages::None => &[],
         }
@@ -407,6 +410,12 @@ fn install_inner(args: &[String]) -> Result<()> {
     require_root()?;
     let opts = parse_options(args)?;
     let platform = Platform::detect();
+    if platform.kind == Kind::Entware {
+        // Entware's tools (iptables, openvpn) before the firmware's. Set before
+        // any thread exists, which is what makes this sound.
+        let path = std::env::var("PATH").unwrap_or_default();
+        unsafe { std::env::set_var("PATH", format!("/opt/sbin:/opt/bin:{path}")) };
+    }
     step(t(
         &format!("платформа: {}", platform.describe()),
         &format!("platform: {}", platform.describe()),
@@ -621,7 +630,25 @@ fn install_inner(args: &[String]) -> Result<()> {
     // 6. Forwarding, persistently where the platform keeps such settings.
     ensure_forwarding(&platform, &mut manifest)?;
 
-    // 7. The service.
+    // 7. Keenetic rebuilds its firewall from scratch whenever its own
+    // configuration changes, wiping our rules; NDMS runs the scripts in
+    // netfilter.d after each rebuild, and ours puts them back.
+    if platform.kind == Kind::Entware {
+        ensure_netfilter()?;
+        let hooks = Path::new("/opt/etc/ndm/netfilter.d");
+        if hooks.is_dir() {
+            let hook = hooks.join("100-anemoi.sh");
+            write_if_changed(&hook, ndm_hook(&platform).as_bytes(), 0o755)
+                .map_err(|e| e.to_string())?;
+            record(&mut manifest, &hook);
+            ok(t(
+                &format!("хук NDMS: {}", hook.display()),
+                &format!("NDMS hook: {}", hook.display()),
+            ));
+        }
+    }
+
+    // 8. The service.
     let unit_changed = install_service(&platform, &mut manifest)?;
     save_manifest(&platform, &manifest)?;
     if !opts.no_start {
@@ -697,6 +724,36 @@ fn ensure_forwarding(platform: &Platform, manifest: &mut Manifest) -> Result<()>
     }
 }
 
+fn ndm_hook(platform: &Platform) -> String {
+    format!(
+        r#"#!/bin/sh
+# Aeolus node: NDMS has rebuilt a firewall table; put our rules back.
+# Installed by `anemoi install`; `anemoi uninstall` removes it.
+# shellcheck disable=SC2154 # NDMS passes $type and $table in the environment
+[ "$type" = "ip6tables" ] && exit 0
+case "$table" in filter|nat) ;; *) exit 0 ;; esac
+export ANEMOI_ENV_FILE={env}
+export PATH=/opt/sbin:/opt/bin:$PATH
+exec {bin} firewall-apply
+"#,
+        bin = platform.bin.display(),
+        env = platform.env_file().display(),
+    )
+}
+
+/// iptables needs the firmware's netfilter modules, which on Keenetic come as
+/// a firmware component, not a package.
+fn ensure_netfilter() -> Result<()> {
+    if quiet("iptables", &["-t", "nat", "-S", "POSTROUTING"]) {
+        ok(t("iptables и NAT работают", "iptables and NAT work"));
+        return Ok(());
+    }
+    Err(t(
+        "iptables не видит таблицу nat. В веб-интерфейсе Keenetic: Общие настройки → Изменить набор компонентов → включи «Модули ядра подсистемы Netfilter», обнови прошивку и запусти установку снова",
+        "iptables cannot see the nat table. In the Keenetic web UI: General settings → Component options → enable “Netfilter subsystem kernel modules”, update, then run the installer again",
+    ))
+}
+
 fn procd_script(platform: &Platform) -> String {
     format!(
         r#"#!/bin/sh /etc/rc.common
@@ -748,6 +805,8 @@ fn entware_script(platform: &Platform) -> String {
 PIDFILE={run}/anemoi.pid
 LOG=/opt/var/log/anemoi.log
 export ANEMOI_ENV_FILE={env}
+# Entware's tools (openvpn, iptables) before the firmware's.
+export PATH=/opt/sbin:/opt/bin:$PATH
 
 running() {{ [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }}
 
@@ -756,14 +815,23 @@ case "$1" in
     running && exit 0
     mkdir -p {run} /opt/var/log
     # The agent restarts OpenVPN itself; this loop restarts the agent.
-    ( while :; do {bin} run >>"$LOG" 2>&1; sleep 5; done ) &
+    # Detached from the caller's terminal, or an ssh session that started it
+    # would wait on the loop forever.
+    ( while :; do {bin} run >>"$LOG" 2>&1; sleep 5; done ) </dev/null >/dev/null 2>&1 &
     echo $! > "$PIDFILE"
     ;;
   stop)
     if running; then
       pid=$(cat "$PIDFILE")
-      pkill -P "$pid" 2>/dev/null
+      # Children first, found through /proc (no pkill on many firmwares):
+      # once the loop is gone they would belong to init and be lost.
+      kids=""
+      for p in /proc/[0-9]*; do
+        [ "$(cut -d' ' -f4 "$p/stat" 2>/dev/null)" = "$pid" ] && kids="$kids ${{p#/proc/}}"
+      done
       kill "$pid" 2>/dev/null
+      # shellcheck disable=SC2086 # a list of pids, split on purpose
+      [ -n "$kids" ] && kill $kids 2>/dev/null
     fi
     rm -f "$PIDFILE"
     ;;

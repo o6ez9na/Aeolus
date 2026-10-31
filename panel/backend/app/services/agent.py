@@ -26,6 +26,7 @@ from app.models.node import (
     NodeStatus,
 )
 from app.services import ccd as ccd_service
+from app.services import exits as exits_service
 from app.services import openvpn, pki, routing
 from app.services.groups import grant_networks
 
@@ -329,14 +330,18 @@ async def _build_transit(
                 )
             )
         )
-        entries = {n.name: openvpn.render_transit_ccd(n) for n in nodes}
+        exits = {n.id for n in await exits_service.remote_exit_nodes(session)}
+        entries = {
+            n.name: openvpn.render_transit_ccd(n, is_exit=n.id in exits) for n in nodes
+        }
         return openvpn.render_transit_server_config(nodes), entries
 
     hub = await session.scalar(select(Node).where(Node.is_hub.is_(True)))
     if hub is None or not hub.address:
         # Nothing to dial yet; the node keeps serving whatever it already has.
         return "", {}
-    return openvpn.render_transit_client_config(node, hub.address), {}
+    is_exit = any(n.id == node.id for n in await exits_service.remote_exit_nodes(session))
+    return openvpn.render_transit_client_config(node, hub.address, is_exit=is_exit), {}
 
 
 async def _build_ccd(session: AsyncSession, node: Node, *, proto: str) -> dict[str, str]:

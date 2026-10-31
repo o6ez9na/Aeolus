@@ -207,13 +207,20 @@ verb 3
 """
 
 
-def render_transit_client_config(node: Node, hub_address: str) -> str:
-    """What a node runs to reach the hub. The node is a client here."""
+def render_transit_client_config(node: Node, hub_address: str, *, is_exit: bool = False) -> str:
+    """What a node runs to reach the hub. The node is a client here.
+
+    The hub reads a node's ccd entry only when the node connects, so a node
+    that becomes (or stops being) an exit has to reconnect: the marker line
+    below changes this file with it, which is what makes the agent restart the
+    tunnel.
+    """
+    exit_marker = "# выход в интернет: да\n" if is_exit else ""
     if node.transit_obfuscated:
         # The tunnel goes to the local wstunnel container, which carries it to
         # the panel inside an ordinary WebSocket on 443.
         return f"""# Aeolus transit · node {node.name} (через WebSocket)
-client
+{exit_marker}client
 dev tun
 proto tcp-client
 remote {settings.transit_wstunnel_host} {settings.vpn_transit_port} tcp
@@ -243,7 +250,7 @@ verb 3
 
     transit_proto = settings.vpn_transit_proto
     return f"""# Aeolus transit · node {node.name}
-client
+{exit_marker}client
 dev tun
 proto {"tcp-client" if transit_proto == "tcp" else "udp"}
 remote {hub_address} {settings.vpn_transit_port} {transit_proto}
@@ -272,8 +279,13 @@ verb 3
 """
 
 
-def render_transit_ccd(node: Node) -> str:
-    """The hub's ccd entry for one node: its address and the LANs behind it."""
+def render_transit_ccd(node: Node, *, is_exit: bool = False) -> str:
+    """The hub's ccd entry for one node: its address and the LANs behind it.
+
+    An exit node also gets the default route: OpenVPN picks the peer for a
+    packet by destination only, and without it drops internet-bound traffic
+    that policy routing has already sent into the tunnel (see services/exits).
+    """
     if node.transit_host is None:
         return f"# {node.name}: no transit address assigned\ndisable\n"
 
@@ -284,6 +296,9 @@ def render_transit_ccd(node: Node) -> str:
     for subnet in node.subnets or []:
         net = ipaddress.ip_network(subnet)
         lines.append(f"iroute {net.network_address} {net.netmask}")
+    if is_exit:
+        lines.append("# выход в интернет для клиентов хаба")
+        lines.append("iroute 0.0.0.0 0.0.0.0")
     return "\n".join(lines) + "\n"
 
 

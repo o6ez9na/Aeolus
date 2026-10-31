@@ -16,7 +16,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.models.node import ClientNodeGrant, ClientStatus, Node, NodeStatus
-from app.services import openvpn, routing
+from app.services import exits, openvpn, routing
 
 # Either form makes OpenVPN send everything to the node: the two halves are what
 # redirect-gateway def1 style setups use, so they win over a plain default.
@@ -209,11 +209,14 @@ async def build(session: AsyncSession, node: Node) -> dict:
 
     checks.append(_cert_check("agent_cert", "Сертификат агента", node.agent_cert_not_after))
 
+    node_is_exit = any(n.id == node.id for n in await exits.remote_exit_nodes(session))
     ccd = _read(config_dir / "ccd-transit" / node.name)
     files.append(
         {
             "name": "ccd-transit (хаб)",
-            "content": ccd if ccd is not None else openvpn.render_transit_ccd(node),
+            "content": ccd
+            if ccd is not None
+            else openvpn.render_transit_ccd(node, is_exit=node_is_exit),
         }
     )
     hub = await session.scalar(select(Node).where(Node.is_hub.is_(True)))
@@ -221,7 +224,9 @@ async def build(session: AsyncSession, node: Node) -> dict:
         files.append(
             {
                 "name": "transit.conf (узел)",
-                "content": openvpn.render_transit_client_config(node, hub.address),
+                "content": openvpn.render_transit_client_config(
+                    node, hub.address, is_exit=node_is_exit
+                ),
             }
         )
 

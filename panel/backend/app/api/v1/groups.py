@@ -14,7 +14,7 @@ from app.schemas.groups import (
     GroupRead,
     GroupUpdate,
 )
-from app.services import audit, groups, openvpn
+from app.services import audit, exits, groups, openvpn
 
 router = APIRouter(prefix="/groups", tags=["groups"])
 
@@ -82,6 +82,11 @@ async def create_group(
     except IntegrityError:
         await session.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Группа с таким именем уже есть") from None
+    try:
+        await exits.check_single_remote_exit(session)
+    except exits.ExitError as exc:
+        await session.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
 
     await audit.record(
         session,
@@ -157,6 +162,11 @@ async def set_grants(
                     row.is_exit = False
 
     await groups.sync_members(session, group)
+    try:
+        await exits.check_single_remote_exit(session)
+    except exits.ExitError as exc:
+        await session.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
     await audit.record(
         session,
         "group.grants",

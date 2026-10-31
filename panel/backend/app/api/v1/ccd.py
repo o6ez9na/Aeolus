@@ -9,7 +9,7 @@ from app.api.deps import CurrentUser, OperatorUser, SessionDep
 from app.core.config import settings
 from app.models.node import Client, ClientGroupGrant, ClientNodeGrant, Node
 from app.schemas.ccd import CcdLimits, CcdRead, CcdUpdate, ExitUpdate
-from app.services import agent, audit, ccd, groups, openvpn, routing
+from app.services import agent, audit, ccd, exits, groups, openvpn, routing
 
 router = APIRouter(prefix="/ccd", tags=["ccd"])
 
@@ -211,6 +211,13 @@ async def set_exit(
             )
 
     grant.is_exit = body.is_exit
+    if body.is_exit:
+        await session.flush()
+        try:
+            await exits.check_single_remote_exit(session)
+        except exits.ExitError as exc:
+            await session.rollback()
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
     await audit.record(
         session,
         "ccd.exit",

@@ -40,6 +40,9 @@ logger = logging.getLogger("anemoi")
 @dataclass
 class Config:
     panel: str = os.environ.get("ANEMOI_PANEL", "backend:50051")
+    # TLS name for gRPC when it shares 443 with the web panel: Caddy routes the
+    # connection to the backend by this name. Empty: the host part of `panel`.
+    panel_sni: str = os.environ.get("ANEMOI_PANEL_SNI", "")
     # HTTPS base URL of the panel API, used once, to enrol.
     panel_api: str = os.environ.get("ANEMOI_PANEL_API", "http://backend:8000")
     token: str = os.environ.get("ANEMOI_ENROLLMENT_TOKEN", "")
@@ -290,7 +293,9 @@ def make_channel(cfg: Config, enrolment: Enrolment) -> grpc.Channel:
     return grpc.secure_channel(
         cfg.panel,
         credentials,
-        options=(("grpc.ssl_target_name_override", _target_name(cfg.panel)),),
+        options=(
+            ("grpc.ssl_target_name_override", cfg.panel_sni or _target_name(cfg.panel)),
+        ),
     )
 
 

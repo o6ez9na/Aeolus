@@ -92,7 +92,7 @@ t_en() {
     admin_pass_gen)   echo "  password:    %s";;
     admin_pass_note)  echo "  (generated — it is also in %s, which is root-only)";;
     admin_pass_kept)  echo "  password:    the one you set (stored in %s)";;
-    ports_note)       echo "Open on this machine: 80, 443 (panel), 1194/udp and 8443/tcp (clients), 1195/udp (nodes), 50051/tcp (agents). Certificates are issued on first request, so give Let's Encrypt a moment.";;
+    ports_note)       echo "Open on this machine: 80 and 443 (the panel; nodes come in through 443 too), 1194/udp and 8443/tcp (clients). Nothing else needs to be reachable. Certificates are issued on first request, so give Let's Encrypt a moment.";;
     add_node_hint)    echo "Add a node from any other server:";;
     node_up)          echo "node is up and has announced itself to %s";;
     fp_wait)          echo "waiting for the agent to print its key fingerprint";;
@@ -161,7 +161,7 @@ t_ru() {
     admin_pass_gen)   echo "  пароль:  %s";;
     admin_pass_note)  echo "  (сгенерирован, лежит в %s — файл только для root)";;
     admin_pass_kept)  echo "  пароль:  тот, что ты задал (хранится в %s)";;
-    ports_note)       echo "Открой на этой машине: 80, 443 (панель), 1194/udp и 8443/tcp (клиенты), 1195/udp (узлы), 50051/tcp (агенты). Сертификат выпускается по первому запросу, дай Let's Encrypt минуту.";;
+    ports_note)       echo "Открой на этой машине: 80 и 443 (панель; ноды тоже приходят через 443), 1194/udp и 8443/tcp (клиенты). Больше ничего снаружи не нужно. Сертификат выпускается по первому запросу, дай Let's Encrypt минуту.";;
     add_node_hint)    echo "Добавить узел с любого другого сервера:";;
     node_up)          echo "узел поднят и отправил заявку на %s";;
     fp_wait)          echo "жду, пока агент напечатает отпечаток своего ключа";;

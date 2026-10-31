@@ -107,7 +107,13 @@ class NodeAgentServicer(agent_pb2_grpc.NodeAgentServicer):
 
 async def build_server() -> aio.Server | None:
     """Create the gRPC server, or None when the CA is not ready yet."""
-    hosts = [h for h in ([settings.master_node_address] + settings.grpc_san_hosts) if h]
+    hosts = [
+        h
+        for h in (
+            [settings.master_node_address] + settings.grpc_san_hosts + [settings.grpc_sni]
+        )
+        if h
+    ]
 
     async with SessionLocal() as session:
         try:

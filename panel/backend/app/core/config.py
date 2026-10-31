@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     grpc_enabled: bool = True
     # Extra names the agents may use to reach the panel, on top of the domain.
     grpc_san_hosts: list[str] = ["localhost", "backend"]
+    # The name agents put in their TLS hello when they reach gRPC through
+    # Caddy on 443; Caddy routes on it, and the certificate must carry it.
+    grpc_sni: str = "anemoi-grpc"
     node_offline_after_seconds: int = 90
 
     # Bootstrap admin, created on first startup if no users exist.
@@ -74,7 +77,11 @@ class Settings(BaseSettings):
     # flow that follows: the tunnel connects, goes silent, and restarts on the
     # inactivity timer forever. Nodes on such a network need the same escape
     # hatch clients already have.
-    vpn_transit_proto: str = "udp"
+    #
+    # TCP by default: transit goes inside a WebSocket by default
+    # (transit_obfuscated_default), and that carries TCP only — a hub listening
+    # on UDP alone leaves every obfuscated node knocking on a closed port.
+    vpn_transit_proto: str = "tcp"
 
     # Name of the wstunnel container a node runs beside OpenVPN, as its own
     # compose network resolves it.

@@ -49,7 +49,10 @@ services:
     environment:
       # gRPC and the HTTPS API of the panel. The agent dials both; the panel
       # never dials back.
-      ANEMOI_PANEL: ${AEOLUS_PANEL_DOMAIN:?set AEOLUS_PANEL_DOMAIN in .env}:${AEOLUS_GRPC_PORT:-50051}
+      # gRPC shares the panel's 443: Caddy passes connections that name
+      # AEOLUS_GRPC_SNI in their TLS hello through to the backend.
+      ANEMOI_PANEL: ${AEOLUS_PANEL_DOMAIN:?set AEOLUS_PANEL_DOMAIN in .env}:${AEOLUS_GRPC_PORT:-443}
+      ANEMOI_PANEL_SNI: ${AEOLUS_GRPC_SNI:-anemoi-grpc}
       ANEMOI_PANEL_API: https://${AEOLUS_PANEL_DOMAIN}
       # What this node calls itself in the join request. The panel sanitises it
       # and may rename on collision.

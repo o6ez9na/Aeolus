@@ -42,9 +42,9 @@ settings, otherwise a reinstall comes back as the same node).
 
 Options of `anemoi install`: `--panel DOMAIN`, `--name NAME`,
 `--subnets CIDR,...` (LANs behind the node offered to clients), `--panel-ca FILE`
-(a panel without a public certificate), `--grpc-port N` and `--sni NAME` (gRPC
-through the panel's 443: `--grpc-port 443 --sni anemoi-grpc`), `--token TOKEN`,
-`--no-start`.
+(a panel without a public certificate), `--grpc-port N` and `--sni NAME` (by default gRPC
+goes through the panel's 443 with SNI `anemoi-grpc`; `--grpc-port 50051` for a
+panel that still publishes its own gRPC port), `--token TOKEN`, `--no-start`.
 
 ## What it does at runtime
 

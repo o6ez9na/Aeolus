@@ -25,6 +25,9 @@ use crate::fsutil::write_if_changed;
 
 type Result<T> = std::result::Result<T, String>;
 
+/// The name the panel's Caddy routes agents' gRPC by on 443.
+const DEFAULT_GRPC_SNI: &str = "anemoi-grpc";
+
 // --- language ----------------------------------------------------------------
 
 fn russian() -> bool {
@@ -524,11 +527,25 @@ fn install_inner(args: &[String]) -> Result<()> {
                 .and_then(|p| p.rsplit_once(':'))
                 .and_then(|(_, p)| p.parse().ok())
         })
-        .unwrap_or(50051);
+        // The panel takes agents on its 443 and tells them apart by SNI;
+        // --grpc-port 50051 for a panel from before that.
+        .unwrap_or(443);
     env.insert("ANEMOI_PANEL".into(), format!("{domain}:{grpc_port}"));
     env.insert("ANEMOI_PANEL_API".into(), format!("https://{domain}"));
-    if let Some(sni) = &opts.sni {
-        env.insert("ANEMOI_PANEL_SNI".into(), sni.clone());
+    match (&opts.sni, grpc_port) {
+        (Some(sni), _) => {
+            env.insert("ANEMOI_PANEL_SNI".into(), sni.clone());
+        }
+        (None, 443) => {
+            env.entry("ANEMOI_PANEL_SNI".into())
+                .or_insert_with(|| DEFAULT_GRPC_SNI.to_string());
+        }
+        // A dedicated gRPC port answers to the panel's own name.
+        (None, _) => {
+            if env.get("ANEMOI_PANEL_SNI").map(String::as_str) == Some(DEFAULT_GRPC_SNI) {
+                env.remove("ANEMOI_PANEL_SNI");
+            }
+        }
     }
 
     if let Some(ca) = &opts.panel_ca {

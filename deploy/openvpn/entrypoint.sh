@@ -154,9 +154,12 @@ seen_ccd=""
 seen_ccd_pid=""
 reconnect_rerouted_nodes() {
     [ -f "$CONFIG_DIR/server.conf" ] && [ -n "$openvpn_transit_pid" ] && [ -d "$TRANSIT_CCD" ] || return 0
+    # Under set -e a failing substitution would take the whole supervisor down
+    # (an empty directory leaves the literal "*"), so the loop must end on 0.
     current=$(cd "$TRANSIT_CCD" && for f in *; do
-        [ -f "$f" ] && printf '%s %s\n' "$(sha256sum <"$f" | cut -d" " -f1)" "$f"
-    done)
+        [ -f "$f" ] || continue
+        printf '%s %s\n' "$(sha256sum <"$f" | cut -d" " -f1)" "$f"
+    done) || current=""
     if [ "$seen_ccd_pid" != "$openvpn_transit_pid" ]; then
         # A listener that just started reads every entry as the nodes connect.
         seen_ccd_pid=$openvpn_transit_pid
@@ -178,7 +181,7 @@ reconnect_rerouted_nodes() {
 
 apply_plan
 apply_node_nat
-reconnect_rerouted_nodes
+reconnect_rerouted_nodes || true
 
 # The agent rewrites server.conf when the panel changes it and touches the flag.
 # The CRL and ccd are re-read by OpenVPN itself, so only server.conf needs this.
@@ -215,7 +218,7 @@ while true; do
     # a restart to get it.
     apply_plan
     apply_node_nat
-    reconnect_rerouted_nodes
+    reconnect_rerouted_nodes || true
 
     current_flag=$(cat "$RESTART_FLAG" 2>/dev/null || echo "")
     if [ "$current_flag" != "$seen_flag" ]; then

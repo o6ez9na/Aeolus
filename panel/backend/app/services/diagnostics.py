@@ -53,7 +53,12 @@ def _cert_check(key: str, title: str, not_after: datetime | None) -> dict:
 
 
 def _normalise(network: str) -> str:
-    # OpenVPN prints host routes without a prefix; everything else as a/len.
+    # OpenVPN prints host routes without a prefix, everything else as a/len,
+    # and the zero address as nothing at all: an exit's 0.0.0.0/0 reads "/0".
+    # Routes it learned from passing traffic carry a trailing "C".
+    network = network.removesuffix("C")
+    if network.startswith("/"):
+        network = "0.0.0.0" + network
     try:
         return str(ipaddress.ip_network(network, strict=False))
     except ValueError:
@@ -224,9 +229,7 @@ async def build(session: AsyncSession, node: Node) -> dict:
         files.append(
             {
                 "name": "transit.conf (узел)",
-                "content": openvpn.render_transit_client_config(
-                    node, hub.address, is_exit=node_is_exit
-                ),
+                "content": openvpn.render_transit_client_config(node, hub.address),
             }
         )
 

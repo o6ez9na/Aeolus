@@ -323,11 +323,13 @@ async def _build_transit(
     if node.is_hub:
         nodes = list(
             await session.scalars(
-                select(Node).where(
+                select(Node)
+                .where(
                     Node.is_hub.is_(False),
                     Node.approval == NodeApproval.approved,
                     Node.is_enabled.is_(True),
                 )
+                .order_by(Node.name)
             )
         )
         exits = {n.id for n in await exits_service.remote_exit_nodes(session)}

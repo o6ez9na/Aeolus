@@ -144,13 +144,15 @@ def render_transit_server_config(nodes: list[Node]) -> str:
     connect: our CA also signs VPN clients, and none of them belong on this
     listener.
     """
-    routes = []
-    for node in nodes:
-        for subnet in node.subnets or []:
-            net = ipaddress.ip_network(subnet)
-            # The kernel route sends the LAN to the tun device; the matching
-            # iroute in the node's ccd file picks which tunnel inside it.
-            routes.append(f"route {net.network_address} {net.netmask}")
+    # Sorted: any change to this file restarts every listener on the hub, so
+    # the same nodes must always render the same text, whatever order the
+    # database hands them over in.
+    nets = sorted(
+        {ipaddress.ip_network(subnet) for node in nodes for subnet in node.subnets or []}
+    )
+    # The kernel route sends the LAN to the tun device; the matching iroute in
+    # the node's ccd file picks which tunnel inside it.
+    routes = [f"route {net.network_address} {net.netmask}" for net in nets]
 
     route_block = "\n".join(routes) or "# no node subnets announced yet"
 

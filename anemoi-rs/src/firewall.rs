@@ -192,6 +192,17 @@ impl Firewall for OpenWrt {
         }
         if removed {
             Self::reload()?;
+            // A reload flushes rules but keeps chains: the zone's would stay
+            // behind, empty and unreferenced. Take them away too.
+            let table = run("nft", &["list", "table", "inet", "fw4"]).unwrap_or_default();
+            for chain in table
+                .lines()
+                .filter_map(|line| line.trim().strip_prefix("chain "))
+                .map(|rest| rest.trim_end_matches('{').trim())
+                .filter(|name| name.contains(UCI_PREFIX))
+            {
+                let _ = run("nft", &["delete", "chain", "inet", "fw4", chain]);
+            }
         }
         Ok(())
     }

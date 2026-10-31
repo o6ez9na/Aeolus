@@ -10,6 +10,7 @@ mod config;
 mod enrol;
 mod firewall;
 mod fsutil;
+mod install;
 mod join;
 mod logger;
 mod status;
@@ -36,9 +37,14 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, BoxError>;
 
-const USAGE: &str = "usage: anemoi [run | fingerprint | version]
+const USAGE: &str = "usage: anemoi [run | install | uninstall | doctor | fingerprint | version]
 
   run          enrol if needed, then keep OpenVPN in sync with the panel (default)
+  install      set this machine up as a node: packages, settings, service
+                 --panel DOMAIN  --name NAME  --subnets CIDR,...  --panel-ca FILE
+                 --grpc-port N  --sni NAME  --token TOKEN  --no-start
+  uninstall    remove what install added (--purge: the node's key and settings too)
+  doctor       check that everything a node needs is in place
   fingerprint  print this node's key fingerprint, as the panel shows it
   version      print the version
 
@@ -57,6 +63,9 @@ fn main() {
 
     let code = match command.as_str() {
         "run" => runtime().block_on(run(cfg)),
+        "install" => install::install(&std::env::args().skip(2).collect::<Vec<_>>()),
+        "uninstall" => install::uninstall(&std::env::args().skip(2).collect::<Vec<_>>()),
+        "doctor" => install::doctor(),
         "fingerprint" => match Enrolment::new(&cfg.state_dir).fingerprint() {
             Ok(fp) => {
                 println!("{fp}");

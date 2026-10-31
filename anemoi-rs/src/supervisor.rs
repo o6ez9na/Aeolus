@@ -13,9 +13,13 @@
 //! lives.
 
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use log::{error, info, warn};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::TcpSocket;
 use tokio::process::{Child, Command};
 use tokio::task::JoinHandle;
@@ -34,6 +38,22 @@ pub struct Supervisor {
     applied_nat: Option<Vec<String>>,
     next_start: Instant,
     backoff: Duration,
+    /// Set by the log reader when OpenVPN's data channel offload fails.
+    dco_failed: Arc<AtomicBool>,
+    /// Once it has failed, OpenVPN runs without DCO for the rest of our life.
+    dco_disabled: bool,
+}
+
+/// Whether an OpenVPN log line says DCO cannot work here. OpenVPN 2.7 turns
+/// DCO on by itself where the kernel has it, and a container (or a kernel
+/// that refuses the netlink calls) then fails on every connect without ever
+/// exiting.
+pub fn dco_failure(line: &str) -> bool {
+    let line = line.to_ascii_lowercase();
+    line.contains("dco")
+        && (line.contains("operation not permitted")
+            || line.contains("cannot add peer")
+            || line.contains("failed to"))
 }
 
 /// How the panel's transit.conf has to change to run here.
@@ -109,6 +129,8 @@ impl Supervisor {
             applied_nat: None,
             next_start: Instant::now(),
             backoff: Duration::from_secs(2),
+            dco_failed: Arc::new(AtomicBool::new(false)),
+            dco_disabled: false,
         }
     }
 
@@ -149,6 +171,12 @@ impl Supervisor {
         self.ensure_bridge(patched.bridge_port).await?;
         self.sync_firewall()?;
 
+        if !self.dco_disabled && self.dco_failed.load(Ordering::Relaxed) {
+            warn!("OpenVPN cannot use DCO here; running it without (--disable-dco)");
+            self.dco_disabled = true;
+            *restart = true;
+        }
+
         if let Some(child) = self.child.as_mut() {
             if let Some(status) = child.try_wait()? {
                 warn!("OpenVPN transit exited ({status}), restarting");
@@ -170,15 +198,36 @@ impl Supervisor {
         let openvpn = find_openvpn(&self.cfg.openvpn_bin)
             .ok_or("openvpn is not installed (looked in /usr/sbin, /opt/sbin, /usr/local/sbin)")?;
         firewall::ensure_forwarding();
-        let child = Command::new(&openvpn)
+        let mut command = Command::new(&openvpn);
+        command
             .arg("--config")
             .arg(self.run_conf())
             .arg("--cd")
-            .arg(&self.cfg.config_dir)
+            .arg(&self.cfg.config_dir);
+        if self.dco_disabled {
+            command.arg("--disable-dco");
+        }
+        let mut child = command
+            .stdout(Stdio::piped())
             .kill_on_drop(true)
             .spawn()
             .map_err(|err| format!("cannot start {}: {err}", openvpn.display()))?;
         info!("started OpenVPN transit (pid {})", child.id().unwrap_or(0));
+
+        // OpenVPN's log goes on to ours unchanged; on the way we watch for the
+        // one failure it never recovers from by itself.
+        if let Some(stdout) = child.stdout.take() {
+            let dco_failed = self.dco_failed.clone();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stdout).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if dco_failure(&line) {
+                        dco_failed.store(true, Ordering::Relaxed);
+                    }
+                    eprintln!("{line}");
+                }
+            });
+        }
         self.child = Some(child);
         Ok(())
     }
@@ -327,6 +376,18 @@ verb 3
         let p = patch_transit(&direct, "aeolus0", Path::new("/tmp/s.log"), "wstunnel");
         assert_eq!(p.bridge_port, None);
         assert!(p.text.contains("\nremote vpn.example.com 1195 udp\n"));
+    }
+
+    #[test]
+    fn dco_failures_are_recognised() {
+        assert!(dco_failure(
+            "2026-10-31 12:01:51 Cannot add peer to DCO: Operation not permitted (-1)"
+        ));
+        assert!(dco_failure(
+            "dco_new_peer: netlink reports error (-28): Operation not permitted"
+        ));
+        assert!(!dco_failure("2026-10-31 12:01:51 DCO device tun0 opened"));
+        assert!(!dco_failure("Initialization Sequence Completed"));
     }
 
     #[test]

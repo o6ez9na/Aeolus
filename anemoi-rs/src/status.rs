@@ -31,20 +31,29 @@ impl Reader {
         let text = match std::fs::read_to_string(path) {
             Ok(text) => text,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Snapshot { message: "OpenVPN не пишет status.log".into(), ..Default::default() };
+                return Snapshot {
+                    message: "OpenVPN не пишет status.log".into(),
+                    ..Default::default()
+                };
             }
             Err(err) => {
-                return Snapshot { message: format!("не читается status.log: {err}"), ..Default::default() };
+                return Snapshot {
+                    message: format!("не читается status.log: {err}"),
+                    ..Default::default()
+                };
             }
         };
         let mut snapshot = parse(&text);
-        snapshot.bandwidth_mbps = self.throughput(snapshot.rx_bytes + snapshot.tx_bytes, Instant::now());
+        snapshot.bandwidth_mbps =
+            self.throughput(snapshot.rx_bytes + snapshot.tx_bytes, Instant::now());
         snapshot
     }
 
     fn throughput(&mut self, total: u64, now: Instant) -> u32 {
         let previous = self.previous.replace((now, total));
-        let Some((then, before)) = previous else { return 0 };
+        let Some((then, before)) = previous else {
+            return 0;
+        };
         let elapsed = now.duration_since(then).as_secs_f64();
         if elapsed <= 0.0 {
             return 0;
@@ -57,7 +66,10 @@ impl Reader {
 
 pub fn parse(text: &str) -> Snapshot {
     let lines: Vec<&str> = text.lines().collect();
-    if lines.first().is_some_and(|l| l.starts_with("OpenVPN STATISTICS")) {
+    if lines
+        .first()
+        .is_some_and(|l| l.starts_with("OpenVPN STATISTICS"))
+    {
         return parse_client_stats(&lines);
     }
 
@@ -80,14 +92,16 @@ pub fn parse(text: &str) -> Snapshot {
         }
         let parts: Vec<&str> = line.split(',').collect();
         match section {
-            "clients" if parts.len() >= 5 && parts[0] != "Common Name" => sessions.push(pb::Session {
-                common_name: parts[0].into(),
-                real_address: parts[1].into(),
-                virtual_address: String::new(),
-                rx_bytes: parts[2].parse().unwrap_or(0),
-                tx_bytes: parts[3].parse().unwrap_or(0),
-                connected_since: parts[4].into(),
-            }),
+            "clients" if parts.len() >= 5 && parts[0] != "Common Name" => {
+                sessions.push(pb::Session {
+                    common_name: parts[0].into(),
+                    real_address: parts[1].into(),
+                    virtual_address: String::new(),
+                    rx_bytes: parts[2].parse().unwrap_or(0),
+                    tx_bytes: parts[3].parse().unwrap_or(0),
+                    connected_since: parts[4].into(),
+                })
+            }
             "routes" if parts.len() >= 2 && parts[0] != "Virtual Address" => {
                 routes.insert(parts[1], parts[0]);
             }
@@ -113,10 +127,10 @@ pub fn parse(text: &str) -> Snapshot {
 fn parse_client_stats(lines: &[&str]) -> Snapshot {
     let mut counters: HashMap<&str, u64> = HashMap::new();
     for line in lines {
-        if let Some((name, value)) = line.split_once(',') {
-            if let Ok(value) = value.trim().parse() {
-                counters.insert(name.trim(), value);
-            }
+        if let Some((name, value)) = line.split_once(',')
+            && let Ok(value) = value.trim().parse()
+        {
+            counters.insert(name.trim(), value);
         }
     }
     Snapshot {
@@ -183,7 +197,10 @@ END
         let start = Instant::now();
         assert_eq!(reader.throughput(0, start), 0);
         // 12.5 MB in one second is 100 Mbit/s.
-        assert_eq!(reader.throughput(12_500_000, start + Duration::from_secs(1)), 100);
+        assert_eq!(
+            reader.throughput(12_500_000, start + Duration::from_secs(1)),
+            100
+        );
         // Counters reset by a restart: no negative throughput.
         assert_eq!(reader.throughput(10, start + Duration::from_secs(2)), 0);
     }

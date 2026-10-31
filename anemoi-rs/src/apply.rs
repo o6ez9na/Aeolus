@@ -15,7 +15,11 @@ const SECRET: &[&str] = &["server.key", "tls-crypt.key", "transit.key"];
 /// Write the bundle. Returns whether OpenVPN needs a restart: it keeps its
 /// options in memory, so a changed server or transit config only takes effect
 /// after one. The CRL and ccd entries it re-reads on its own.
-pub fn apply_config(config_dir: &Path, state_dir: &Path, response: &ConfigResponse) -> io::Result<bool> {
+pub fn apply_config(
+    config_dir: &Path,
+    state_dir: &Path,
+    response: &ConfigResponse,
+) -> io::Result<bool> {
     fs::create_dir_all(config_dir)?;
 
     let mut restart_needed = false;
@@ -44,7 +48,14 @@ pub fn apply_config(config_dir: &Path, state_dir: &Path, response: &ConfigRespon
         ("crl.pem", response.crl_pem.clone()),
         // What to masquerade, one subnet per line; empty on the hub, which
         // NATs from its routing plan instead.
-        ("nat-subnets", response.nat_subnets.iter().map(|n| format!("{n}\n")).collect()),
+        (
+            "nat-subnets",
+            response
+                .nat_subnets
+                .iter()
+                .map(|n| format!("{n}\n"))
+                .collect(),
+        ),
     ];
     if !response.transit_conf.is_empty() && !response.is_hub {
         // A node dials the hub as an OpenVPN client with the same certificate
@@ -77,7 +88,11 @@ pub fn apply_config(config_dir: &Path, state_dir: &Path, response: &ConfigRespon
         sync_ccd(&config_dir.join(dirname), entries)?;
     }
 
-    write_if_changed(&config_dir.join(".revision"), response.revision.as_bytes(), 0o644)?;
+    write_if_changed(
+        &config_dir.join(".revision"),
+        response.revision.as_bytes(),
+        0o644,
+    )?;
     Ok(restart_needed)
 }
 
@@ -124,7 +139,10 @@ mod tests {
             ccd: HashMap::from([("alice".into(), "disable\n".into())]),
             ccd_tcp: HashMap::from([("alice".into(), "disable\n".into())]),
             transit_conf: "transit server\n".into(),
-            ccd_transit: HashMap::from([("home".into(), "iroute 192.168.5.0 255.255.255.0\n".into())]),
+            ccd_transit: HashMap::from([(
+                "home".into(),
+                "iroute 192.168.5.0 255.255.255.0\n".into(),
+            )]),
             is_hub: true,
             ..Default::default()
         }
@@ -141,7 +159,10 @@ mod tests {
         let response = hub_response();
 
         assert!(apply_config(&config, dir.path(), &response).unwrap());
-        assert_eq!(fs::read_to_string(config.join("server.conf")).unwrap(), "port 1194\n");
+        assert_eq!(
+            fs::read_to_string(config.join("server.conf")).unwrap(),
+            "port 1194\n"
+        );
         assert_eq!(mode(&config.join("server.key")), 0o600);
         assert_eq!(mode(&config.join("tls-crypt.key")), 0o600);
         assert_eq!(mode(&config.join("ca.crt")), 0o644);
@@ -154,7 +175,10 @@ mod tests {
 
         // Only a ccd change: OpenVPN re-reads those itself.
         let mut changed = response.clone();
-        changed.ccd.insert("bob".into(), "ifconfig-push 10.20.0.3 255.255.255.0\n".into());
+        changed.ccd.insert(
+            "bob".into(),
+            "ifconfig-push 10.20.0.3 255.255.255.0\n".into(),
+        );
         assert!(!apply_config(&config, dir.path(), &changed).unwrap());
         assert!(config.join("ccd/bob").exists());
 
@@ -192,7 +216,10 @@ mod tests {
         };
         assert!(apply_config(&config, &state, &response).unwrap());
         assert!(!config.join("server.conf").exists());
-        assert_eq!(fs::read_to_string(config.join("transit.crt")).unwrap(), "NODECERT");
+        assert_eq!(
+            fs::read_to_string(config.join("transit.crt")).unwrap(),
+            "NODECERT"
+        );
         assert_eq!(mode(&config.join("transit.key")), 0o600);
         assert_eq!(
             fs::read_to_string(config.join("nat-subnets")).unwrap(),

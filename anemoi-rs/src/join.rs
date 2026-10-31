@@ -143,7 +143,11 @@ pub async fn join(cfg: &mut Config, enrolment: &Enrolment, client: &reqwest::Cli
 
 async fn announce(cfg: &Config, enrolment: &Enrolment, client: &reqwest::Client) -> Option<String> {
     let host = hostname();
-    let name = if cfg.node_name.is_empty() { host.clone() } else { cfg.node_name.clone() };
+    let name = if cfg.node_name.is_empty() {
+        host.clone()
+    } else {
+        cfg.node_name.clone()
+    };
     let csr_pem = match enrolment.create_csr(&name) {
         Ok(csr) => csr,
         Err(err) => {
@@ -181,11 +185,17 @@ async fn announce(cfg: &Config, enrolment: &Enrolment, client: &reqwest::Client)
     }
 }
 
-async fn collect(enrolment: &Enrolment, client: &reqwest::Client, cfg: &Config, token: &str) -> bool {
+async fn collect(
+    enrolment: &Enrolment,
+    client: &reqwest::Client,
+    cfg: &Config,
+    token: &str,
+) -> bool {
     let path = format!("/api/v1/agents/announce/{token}");
     match call::<PollReply>(client, cfg, &path, None).await {
         Call::Ok(reply) => {
-            let (Some(cert), Some(ca), Some(name)) = (&reply.cert_pem, &reply.ca_pem, &reply.node_name)
+            let (Some(cert), Some(ca), Some(name)) =
+                (&reply.cert_pem, &reply.ca_pem, &reply.node_name)
             else {
                 info!("waiting to be accepted (state: {})", reply.status);
                 return false;
@@ -220,7 +230,11 @@ async fn collect(enrolment: &Enrolment, client: &reqwest::Client, cfg: &Config, 
     }
 }
 
-async fn enroll_with_token(cfg: &mut Config, enrolment: &Enrolment, client: &reqwest::Client) -> bool {
+async fn enroll_with_token(
+    cfg: &mut Config,
+    enrolment: &Enrolment,
+    client: &reqwest::Client,
+) -> bool {
     if cfg.token.is_empty() {
         cfg.token = fs::read_to_string(&cfg.token_file)
             .map(|t| t.trim().to_string())

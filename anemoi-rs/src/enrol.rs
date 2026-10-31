@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair, PublicKeyData};
 
-use crate::fsutil::{write_atomic, write_if_changed};
 use crate::Result;
+use crate::fsutil::{write_atomic, write_if_changed};
 
 pub struct Enrolment {
     pub key_path: PathBuf,
@@ -122,10 +122,17 @@ mod tests {
         let second = enrolment.fingerprint().unwrap();
         assert_eq!(first, second, "the key must survive between calls");
         assert_eq!(first.len(), 32 * 3 - 1);
-        let mode = fs::metadata(&enrolment.key_path).unwrap().permissions().mode() & 0o777;
+        let mode = fs::metadata(&enrolment.key_path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
         assert_eq!(mode, 0o600);
         let pem = fs::read_to_string(&enrolment.key_path).unwrap();
-        assert!(pem.starts_with("-----BEGIN PRIVATE KEY-----"), "PKCS#8 like the Python agent");
+        assert!(
+            pem.starts_with("-----BEGIN PRIVATE KEY-----"),
+            "PKCS#8 like the Python agent"
+        );
     }
 
     #[test]

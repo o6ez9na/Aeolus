@@ -57,7 +57,10 @@ fn main() {
                 0
             }
             Err(err) => {
-                eprintln!("cannot read or create the key in {}: {err}", cfg.state_dir.display());
+                eprintln!(
+                    "cannot read or create the key in {}: {err}",
+                    cfg.state_dir.display()
+                );
                 1
             }
         },
@@ -99,7 +102,10 @@ async fn shutdown_signal() {
 
 async fn run(mut cfg: Config) -> i32 {
     if let Err(err) = std::fs::create_dir_all(&cfg.state_dir) {
-        error!("cannot create the state directory {}: {err}", cfg.state_dir.display());
+        error!(
+            "cannot create the state directory {}: {err}",
+            cfg.state_dir.display()
+        );
         return 1;
     }
     let enrolment = Enrolment::new(&cfg.state_dir);
@@ -110,7 +116,10 @@ async fn run(mut cfg: Config) -> i32 {
             return 1;
         }
     };
-    info!("anemoi {VERSION} starting, panel {} (TLS name {})", cfg.panel, cfg.panel_sni);
+    info!(
+        "anemoi {VERSION} starting, panel {} (TLS name {})",
+        cfg.panel, cfg.panel_sni
+    );
 
     let interval = Duration::from_secs(cfg.interval_secs);
     let shutdown = shutdown_signal();
@@ -142,10 +151,10 @@ async fn run(mut cfg: Config) -> i32 {
                 Err(err) => error!("cannot set up the channel to the panel: {err}"),
             }
         }
-        if let Some(stub) = client.as_mut() {
-            if let Err(err) = sync_once(&cfg, stub, &mut revision, &mut reader).await {
-                warn!("panel call failed: {err}");
-            }
+        if let Some(stub) = client.as_mut()
+            && let Err(err) = sync_once(&cfg, stub, &mut revision, &mut reader).await
+        {
+            warn!("panel call failed: {err}");
         }
         tokio::select! {
             _ = &mut shutdown => return 0,
@@ -178,7 +187,9 @@ async fn sync_once(
     reader: &mut status::Reader,
 ) -> Result<()> {
     let config = stub
-        .get_config(pb::ConfigRequest { known_revision: revision.clone() })
+        .get_config(pb::ConfigRequest {
+            known_revision: revision.clone(),
+        })
         .await
         .map_err(describe_status)?
         .into_inner();

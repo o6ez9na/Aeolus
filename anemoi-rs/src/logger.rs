@@ -41,7 +41,10 @@ pub fn init(level: &str) {
 
 /// `YYYY-MM-DD HH:MM:SS` in UTC, without a date crate.
 fn utc_now() -> String {
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     format_utc(secs)
 }
 

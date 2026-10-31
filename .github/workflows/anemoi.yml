@@ -1,0 +1,160 @@
+# Build the node agent for the routers and servers a node runs on.
+#
+# Every push that touches the agent or the proto: tests, then a static binary
+# per target, each smoke-tested under qemu-user. A tag `anemoi-v*` also
+# publishes them as a release, with checksums the installer verifies.
+name: anemoi
+
+on:
+  push:
+    branches: [main]
+    tags: ["anemoi-v*"]
+    paths:
+      - "anemoi-rs/**"
+      - "proto/**"
+      - ".github/workflows/anemoi.yml"
+  pull_request:
+    paths:
+      - "anemoi-rs/**"
+      - "proto/**"
+      - ".github/workflows/anemoi.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # The MIPS targets are tier 3 and need a nightly; pinned, so a nightly
+  # regression cannot break a release overnight. Bump deliberately.
+  NIGHTLY: nightly-2026-10-29
+  ZIGLANG_VERSION: "0.17.0"
+  CARGO_ZIGBUILD_VERSION: "0.24.0"
+
+defaults:
+  run:
+    working-directory: anemoi-rs
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: anemoi-rs
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  build:
+    needs: test
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Servers and docker.
+          - target: x86_64-unknown-linux-musl
+            qemu: ""
+          # Keenetic (KN-3810 and other ARM models), OpenWrt on ARM, RouterOS arm64.
+          - target: aarch64-unknown-linux-musl
+            qemu: qemu-aarch64-static
+          # Keenetic on MT7621/MT7628 (Giant, Ultra, ...) and most MIPS OpenWrt boxes.
+          - target: mipsel-unknown-linux-musl
+            qemu: qemu-mipsel-static
+            tier3: true
+          # Big-endian MIPS (Keenetic on EcoNet/Airoha, older Atheros OpenWrt).
+          - target: mips-unknown-linux-musl
+            qemu: qemu-mips-static
+            tier3: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust (stable)
+        if: ${{ !matrix.tier3 }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust (pinned nightly with rust-src, for -Zbuild-std)
+        if: ${{ matrix.tier3 }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.NIGHTLY }}
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: anemoi-rs
+          key: ${{ matrix.target }}
+
+      - name: zig and cargo-zigbuild
+        run: python3 -m pip install --user "ziglang==${ZIGLANG_VERSION}" "cargo-zigbuild==${CARGO_ZIGBUILD_VERSION}"
+
+      - name: Build
+        run: |
+          if [ "${{ matrix.tier3 }}" = "true" ]; then
+            cargo "+${NIGHTLY}" zigbuild --release --target "${{ matrix.target }}" -Zbuild-std=std,panic_abort
+          else
+            cargo zigbuild --release --target "${{ matrix.target }}"
+          fi
+
+      - name: Smoke test
+        run: |
+          bin="target/${{ matrix.target }}/release/anemoi"
+          file "$bin"
+          if [ -n "${{ matrix.qemu }}" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user-static >/dev/null
+            run() { "${{ matrix.qemu }}" "$bin" "$@"; }
+          else
+            run() { "$bin" "$@"; }
+          fi
+          run version
+          state=$(mktemp -d)
+          fp1=$(ANEMOI_ENV_FILE=/nonexistent ANEMOI_STATE_DIR="$state" run fingerprint)
+          fp2=$(ANEMOI_ENV_FILE=/nonexistent ANEMOI_STATE_DIR="$state" run fingerprint)
+          if [ "$fp1" != "$fp2" ] || [ "${#fp1}" -ne 95 ]; then
+            echo "fingerprint unstable or malformed: $fp1 / $fp2"
+            exit 1
+          fi
+
+      - name: Package
+        run: |
+          mkdir -p ../dist
+          cp "target/${{ matrix.target }}/release/anemoi" "../dist/anemoi-${{ matrix.target }}"
+          cd ../dist && sha256sum "anemoi-${{ matrix.target }}" > "anemoi-${{ matrix.target }}.sha256"
+          ls -la
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anemoi-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/anemoi-v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          cat ./*.sha256 > SHA256SUMS
+          gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" --notes "anemoi node agent ${GITHUB_REF_NAME#anemoi-v}" \
+            anemoi-* SHA256SUMS

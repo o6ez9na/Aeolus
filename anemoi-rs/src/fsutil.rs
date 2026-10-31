@@ -11,11 +11,11 @@ use std::path::Path;
 /// applied either way, so a file someone loosened by hand gets fixed. Returns
 /// whether the content changed.
 pub fn write_if_changed(path: &Path, content: &[u8], mode: u32) -> io::Result<bool> {
-    if let Ok(existing) = fs::read(path) {
-        if existing == content {
-            set_mode(path, mode)?;
-            return Ok(false);
-        }
+    if let Ok(existing) = fs::read(path)
+        && existing == content
+    {
+        set_mode(path, mode)?;
+        return Ok(false);
     }
     write_atomic(path, content, mode)?;
     Ok(true)
@@ -29,7 +29,11 @@ pub fn write_atomic(path: &Path, content: &[u8], mode: u32) -> io::Result<()> {
     let name = path
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
-    let tmp = dir.join(format!(".{}.tmp{}", name.to_string_lossy(), std::process::id()));
+    let tmp = dir.join(format!(
+        ".{}.tmp{}",
+        name.to_string_lossy(),
+        std::process::id()
+    ));
 
     let result = (|| {
         let mut file = OpenOptions::new()
@@ -103,11 +107,17 @@ mod tests {
         let path = dir.path().join("server.key");
         assert!(write_if_changed(&path, b"secret", 0o600).unwrap());
         assert!(!write_if_changed(&path, b"secret", 0o600).unwrap());
-        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
 
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
         assert!(!write_if_changed(&path, b"secret", 0o600).unwrap());
-        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
 
         assert!(write_if_changed(&path, b"other", 0o600).unwrap());
         assert_eq!(fs::read(&path).unwrap(), b"other");

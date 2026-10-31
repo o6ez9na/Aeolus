@@ -162,7 +162,10 @@ mod tests {
         let mut env = HashMap::new();
         env.insert("ANEMOI_ENV_FILE".into(), "/nonexistent".into());
         env.insert("ANEMOI_PANEL".into(), "vpn.example.com:443".into());
-        env.insert("ANEMOI_SUBNETS".into(), " 10.0.0.0/24, ,192.168.5.0/24".into());
+        env.insert(
+            "ANEMOI_SUBNETS".into(),
+            " 10.0.0.0/24, ,192.168.5.0/24".into(),
+        );
         let cfg = Config::load(&env);
         assert_eq!(cfg.panel_sni, "vpn.example.com");
         assert_eq!(cfg.subnets, vec!["10.0.0.0/24", "192.168.5.0/24"]);

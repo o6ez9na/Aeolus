@@ -376,7 +376,9 @@ export function buildGraph({
         sub:
           state === 'up'
             ? { text: `${transportLabel(node)} · сессий ${granted}`, tone: '' }
-            : state === 'down'
+            : state === 'reconnecting'
+              ? { text: `переподключается · ${transportLabel(node)}`, tone: 'warn' }
+              : state === 'down'
               ? { text: `нет туннеля · ${transportLabel(node)}`, tone: 'err' }
               : state === 'pending'
                 ? { text: 'заявка · сверить ключ', tone: 'warn' }
@@ -389,13 +391,21 @@ export function buildGraph({
 
     if (layers.transit) {
       const color =
-        state === 'up' ? 'var(--transit)' : state === 'down' ? 'var(--err)' : 'var(--line-strong)'
+        state === 'up'
+          ? 'var(--transit)'
+          : state === 'reconnecting'
+            ? 'var(--warn)'
+            : state === 'down'
+              ? 'var(--err)'
+              : 'var(--line-strong)'
       // Network transit with the panel: the same tunnel, drawn as a bridge
-      // while it carries the LANs. A bridge over a tunnel that is down keeps
-      // the alarm colours and says so on its chip.
+      // while it carries the LANs. Reconnecting, the bridge stays and only
+      // pauses; a bridge over a tunnel that is really down takes the alarm
+      // colours and says so on its chip.
       const bridged = Boolean(linkOf(links, node, prep.hub))
+      const alive = state === 'up' || state === 'reconnecting'
       const selected = isSel('transit', node.id)
-      edge(`t:${node.id}`, HUB, id, edgeStyle(color, state === 'up' ? 2.5 : 1.75, eop(`t:${node.id}`)), {
+      edge(`t:${node.id}`, HUB, id, edgeStyle(color, state === 'up' ? 2.5 : 2, eop(`t:${node.id}`)), {
         cls: `transit-edge${selected ? ' sel' : ''} ${state === 'up' ? '' : state === 'down' ? 'dashed-wide' : 'dotted'}`,
         sourceHandle: 'out',
         targetHandle: 'in',
@@ -403,10 +413,18 @@ export function buildGraph({
         data: pending
           ? undefined
           : {
-              bridged: bridged && state === 'up',
+              bridged: bridged && alive,
+              paused: state === 'reconnecting',
               selected,
-              chip: bridged && state !== 'up' ? '⇄ транзит сетей · нет туннеля' : selected ? 'транзит' : null,
-              chipTone: bridged && state !== 'up' ? 'err' : '',
+              chip:
+                bridged && !alive
+                  ? '⇄ транзит сетей · нет туннеля'
+                  : !bridged && state === 'reconnecting'
+                    ? 'переподключается…'
+                    : selected
+                      ? 'транзит'
+                      : null,
+              chipTone: bridged && !alive ? 'err' : state === 'reconnecting' ? 'warn' : '',
               onOpen: () => onOpenEdge?.({ type: 'transit', id: node.id }),
             },
       })
@@ -449,18 +467,20 @@ export function buildGraph({
       if (!shownIds.has(link.node_a_id) || !shownIds.has(link.node_b_id)) continue
       const a = prep.shown.find((n) => n.id === link.node_a_id)
       const b = prep.shown.find((n) => n.id === link.node_b_id)
-      const up = nodeState(a) === 'up' && nodeState(b) === 'up'
+      const states = [nodeState(a), nodeState(b)]
+      const alive = states.every((s) => s === 'up' || s === 'reconnecting')
       const selected = isSel('link', link.id)
       edge(`k:${link.id}`, nid(a.id), nid(b.id), edgeStyle('var(--err)', 1.75, eop(`k:${link.id}`)), {
-        cls: `transit-edge${selected ? ' sel' : ''}${up ? '' : ' dashed-wide'}`,
+        cls: `transit-edge${selected ? ' sel' : ''}${alive ? '' : ' dashed-wide'}`,
         sourceHandle: 'out',
         targetHandle: 'in',
         type: 'transit',
         data: {
-          bridged: up,
+          bridged: alive,
+          paused: states.includes('reconnecting'),
           both: true,
           selected,
-          chip: up ? null : '⇄ транзит сетей · нет туннеля',
+          chip: alive ? null : '⇄ транзит сетей · нет туннеля',
           chipTone: 'err',
           onOpen: () => onOpenEdge?.({ type: 'link', id: link.id }),
         },

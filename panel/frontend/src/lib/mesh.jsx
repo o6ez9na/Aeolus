@@ -6,6 +6,19 @@ import { exitGrant } from './model'
 
 const MeshContext = createContext(null)
 const POLL_MS = 8000
+// A node that lost its tunnel this recently is reconnecting, not down: turning
+// network transit on or switching its transport makes it drop the session on
+// purpose, and it is back within seconds. Only after this long is it trouble.
+export const RECONNECT_GRACE_MS = 30000
+// One failed poll is a blip (the backend restarting, Wi-Fi roaming); two in a
+// row are worth saying.
+const ERROR_AFTER_FAILURES = 2
+
+const tunnelDown = (node) =>
+  node.approval === 'approved' &&
+  node.is_enabled &&
+  !node.is_hub &&
+  (!node.transit_connected || node.status === 'error')
 
 /**
  * Nodes, clients and the map layout, loaded once for the whole shell and kept
@@ -23,6 +36,9 @@ export function MeshProvider({ children }) {
   const [error, setError] = useState(null)
   const [updatedAt, setUpdatedAt] = useState(null)
   const seen = useRef({})
+  const downSince = useRef({})
+  const firstLoad = useRef(true)
+  const failures = useRef(0)
 
   // An unchanged poll must not hand React fresh arrays: the map would rebuild
   // every card and anyone mid-drag would lose what they were holding.
@@ -41,14 +57,31 @@ export function MeshProvider({ children }) {
         api.get('/groups'),
         api.get('/links'),
       ])
-      setIfChanged('nodes', n, setNodes)
+      // Mark nodes inside the grace window. A node already down when the page
+      // opens has been down for who knows how long, so it gets no grace.
+      const now = Date.now()
+      const live = new Set()
+      const marked = n.map((node) => {
+        if (!tunnelDown(node)) return node
+        live.add(node.id)
+        const since = (downSince.current[node.id] ??= firstLoad.current ? now - RECONNECT_GRACE_MS : now)
+        return now - since < RECONNECT_GRACE_MS ? { ...node, reconnecting: true } : node
+      })
+      for (const id of Object.keys(downSince.current)) if (!live.has(id)) delete downSince.current[id]
+      firstLoad.current = false
+
+      setIfChanged('nodes', marked, setNodes)
       setIfChanged('clients', c, setClients)
       setIfChanged('groups', g, setGroups)
       setIfChanged('links', l, setLinks)
+      failures.current = 0
       setError(null)
       setUpdatedAt(Date.now())
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось загрузить данные')
+      failures.current += 1
+      if (failures.current >= ERROR_AFTER_FAILURES) {
+        setError(err instanceof Error ? err.message : 'Не удалось загрузить данные')
+      }
     }
   }, [setIfChanged])
 

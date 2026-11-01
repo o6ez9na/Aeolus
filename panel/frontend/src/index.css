@@ -1324,12 +1324,46 @@ button.chip:hover {
   color: var(--bg);
   font-size: 13px;
   box-shadow: var(--shadow);
-  animation: rise var(--dur) var(--ease);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  pointer-events: auto;
+  animation: rise 0.32s var(--ease) both;
+}
+
+.toast.out {
+  animation: toast-out 0.24s var(--ease) both;
 }
 
 .toast.err {
   background: var(--err);
   color: #fff;
+}
+
+.toast.warn {
+  background: var(--warn);
+  color: #1b1f24;
+}
+
+.toast-act {
+  all: unset;
+  cursor: pointer;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 7px;
+  background: rgb(255 255 255 / 18%);
+  white-space: nowrap;
+}
+
+.toast-act:hover {
+  background: rgb(255 255 255 / 28%);
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
 }
 
 @keyframes fade {
@@ -1481,7 +1515,8 @@ button.chip:hover {
 }
 
 .react-flow__edge-path {
-  transition: opacity var(--dur) var(--ease), stroke-width var(--dur) var(--ease);
+  transition: opacity var(--dur) var(--ease), stroke-width var(--dur) var(--ease),
+    stroke 0.6s var(--ease), stroke-dasharray 0.6s var(--ease);
 }
 
 .react-flow__edge.flow .react-flow__edge-path {
@@ -1520,13 +1555,22 @@ button.chip:hover {
   filter: drop-shadow(0 0 4px var(--transit));
 }
 
-/* A bridge: glow underneath, a gradient core, packets running along it. */
+/* A bridge: glow underneath, a gradient core, packets running along it. It
+   fades in when network transit comes on, breathes slowly, and pauses (dimmed,
+   not gone) while the node reconnects. */
+.bridge {
+  transition: opacity 0.5s var(--ease);
+  animation: bridge-in 0.9s var(--ease) both;
+}
+
 .bridge-glow {
   fill: none;
   stroke-width: 14;
   stroke-linecap: round;
-  filter: blur(5px);
+  filter: blur(6px);
   pointer-events: none;
+  opacity: 0.3;
+  animation: bridge-breathe 3.6s ease-in-out infinite alternate;
 }
 
 .react-flow__edge-path.bridge-core {
@@ -1538,27 +1582,53 @@ button.chip:hover {
   stroke: var(--bridge);
   stroke-width: 4.5;
   stroke-linecap: round;
-  stroke-dasharray: 0.1 26;
-  animation: bridge-run 1.4s linear infinite;
+  stroke-dasharray: 0.1 34;
   pointer-events: none;
   filter: drop-shadow(0 0 3px var(--bridge));
+  animation: bridge-run 2.8s linear infinite;
+  transition: opacity 0.6s var(--ease);
 }
 
 .bridge-pulse.rev {
   stroke: var(--transit);
   animation-direction: reverse;
-  animation-delay: -0.7s;
+  animation-delay: -1.4s;
   filter: drop-shadow(0 0 3px var(--transit));
 }
 
-@keyframes bridge-run {
-  to {
-    stroke-dashoffset: -26.1;
-  }
+.bridge.paused .bridge-pulse {
+  animation-play-state: paused;
+  opacity: 0.25;
+}
+
+.bridge.paused .bridge-glow {
+  animation-play-state: paused;
+  opacity: 0.12;
 }
 
 .react-flow__edge.transit-edge.sel .bridge-glow {
   stroke-width: 20;
+}
+
+@keyframes bridge-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes bridge-breathe {
+  from {
+    opacity: 0.22;
+  }
+  to {
+    opacity: 0.48;
+  }
+}
+
+@keyframes bridge-run {
+  to {
+    stroke-dashoffset: -34.1;
+  }
 }
 
 .edge-chip,
@@ -1573,7 +1643,15 @@ button.chip:hover {
   border: 1px solid var(--line-strong);
   background: var(--surface);
   color: var(--muted);
-  transition: box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+  transition: box-shadow 0.3s var(--ease), border-color 0.4s var(--ease), color 0.4s var(--ease),
+    background 0.4s var(--ease);
+  animation: chip-in 0.35s var(--ease) both;
+}
+
+.edge-chip.warn {
+  border-color: var(--warn);
+  color: var(--warn);
+  background: var(--warn-soft);
 }
 
 .edge-chip.err {
@@ -1589,9 +1667,22 @@ button.chip:hover {
   box-shadow: 0 0 0 3px var(--bridge-soft);
 }
 
+.bridge-chip.paused {
+  border-color: var(--warn);
+  color: var(--warn);
+  box-shadow: 0 0 0 3px var(--warn-soft);
+}
+
 .bridge-chip:hover,
 .bridge-chip.sel {
   box-shadow: 0 0 0 5px var(--bridge-soft), 0 0 14px var(--bridge-soft);
+}
+
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    scale: 0.92;
+  }
 }
 
 /* The two sides of a bridge, in the inspector. */
@@ -1635,7 +1726,11 @@ button.chip:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bridge-pulse {
+  .bridge-pulse,
+  .bridge-glow,
+  .bridge,
+  .edge-chip,
+  .bridge-chip {
     animation: none;
   }
 }

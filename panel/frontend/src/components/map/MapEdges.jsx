@@ -57,7 +57,8 @@ export const TransitEdge = memo(function TransitEdge({
   }
 
   // One gradient per edge, laid along the line itself so it reads source to
-  // target however the cards are arranged.
+  // target however the cards are arranged. The group carries the dimming, so
+  // the glow and the packets can animate their own opacity freely.
   const gradient = `bridge-grad-${id.replace(/[^a-zA-Z0-9_-]/g, '_')}`
   return (
     <>
@@ -67,25 +68,27 @@ export const TransitEdge = memo(function TransitEdge({
           <stop offset="100%" style={{ stopColor: 'var(--bridge)' }} />
         </linearGradient>
       </defs>
-      <path d={path} className="bridge-glow" style={{ stroke: `url(#${gradient})`, opacity: 0.35 * opacity }} />
-      <BaseEdge
-        id={id}
-        path={path}
-        className="bridge-core"
-        style={{ stroke: `url(#${gradient})`, strokeWidth: 3.5, opacity }}
-        interactionWidth={30}
-      />
-      <path d={path} className="bridge-pulse" style={{ opacity }} />
-      {data.both && <path d={path} className="bridge-pulse rev" style={{ opacity }} />}
+      <g className={`bridge${data.paused ? ' paused' : ''}`} style={{ opacity }}>
+        <path d={path} className="bridge-glow" style={{ stroke: `url(#${gradient})` }} />
+        <BaseEdge
+          id={id}
+          path={path}
+          className="bridge-core"
+          style={{ stroke: `url(#${gradient})`, strokeWidth: 3.5 }}
+          interactionWidth={30}
+        />
+        <path d={path} className="bridge-pulse" />
+        {data.both && <path d={path} className="bridge-pulse rev" />}
+      </g>
       <EdgeLabelRenderer>
         <button
           type="button"
-          className={`bridge-chip nodrag nopan${data.selected ? ' sel' : ''}`}
+          className={`bridge-chip nodrag nopan${data.selected ? ' sel' : ''}${data.paused ? ' paused' : ''}`}
           style={chipAt}
           onClick={open}
           title="Транзит сетей: открыть настройку"
         >
-          <span aria-hidden="true">⇄</span> транзит сетей
+          <span aria-hidden="true">⇄</span> транзит сетей{data.paused ? ' · переподключается' : ''}
         </button>
       </EdgeLabelRenderer>
     </>

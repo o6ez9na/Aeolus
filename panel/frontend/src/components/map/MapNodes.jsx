@@ -123,7 +123,16 @@ export const HubCard = memo(function HubCard({ data: d }) {
 
 export const NodeCard = memo(function NodeCard({ data: d }) {
   const { node, state, sub } = d
-  const extra = state === 'pending' ? 'dashed warn' : state === 'down' ? 'err' : state === 'off' ? 'faded' : ''
+  const extra =
+    state === 'pending'
+      ? 'dashed warn'
+      : state === 'reconnecting'
+        ? 'warn'
+        : state === 'down'
+          ? 'err'
+          : state === 'off'
+            ? 'faded'
+            : ''
   return (
     <div className={cls('m-node', d, extra)}>
       <Anchor type="target" position={Position.Left} id="in" />

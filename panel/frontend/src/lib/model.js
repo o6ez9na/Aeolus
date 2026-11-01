@@ -40,14 +40,16 @@ export function nodeState(node) {
   if (node.is_hub) return node.status === 'error' || node.status === 'offline' ? 'down' : 'up'
   // A node is judged by its tunnel: an agent can answer while clients cannot
   // reach anything behind it.
-  if (!node.transit_connected) return 'down'
-  if (node.status === 'error') return 'down'
+  // A tunnel that dropped moments ago is reconnecting (see mesh: the grace
+  // window), which is what switching network transit on looks like.
+  if (!node.transit_connected || node.status === 'error') return node.reconnecting ? 'reconnecting' : 'down'
   return 'up'
 }
 
 export const NODE_STATE_LABEL = {
   up: 'онлайн',
   down: 'нет туннеля',
+  reconnecting: 'переподключается',
   pending: 'ждёт подтверждения',
   rejected: 'отклонён',
   off: 'выключен',
@@ -55,6 +57,7 @@ export const NODE_STATE_LABEL = {
 
 export function dotClass(state) {
   if (state === 'online' || state === 'up') return 'dot live'
+  if (state === 'reconnecting') return 'dot warn pulse'
   if (state === 'pending' || state === 'noaccess' || state === 'expired') return 'dot warn'
   if (state === 'down' || state === 'revoked') return 'dot err'
   if (state === 'disabled' || state === 'off' || state === 'rejected') return 'dot off'

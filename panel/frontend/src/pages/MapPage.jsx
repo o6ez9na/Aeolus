@@ -386,9 +386,6 @@ function MapView() {
     inspector = <HubInspector hub={prep.hub} onSelect={setSel} />
   }
 
-  const pending = nodes.filter((n) => n.approval === 'pending')
-  const down = nodes.filter((n) => n.approval === 'approved' && nodeState(n) === 'down')
-
   return (
     <>
       <PageHead
@@ -396,33 +393,6 @@ function MapView() {
         sub="Строится сама из сессий, транзитов и доступов. Карточки можно двигать."
       />
 
-      {(pending.length > 0 || down.length > 0) && (
-        <div className="row-wrap" style={{ gap: 10 }}>
-          {pending.slice(0, 2).map((node) => (
-            <div key={node.id} className="notice warn">
-              <Icon name="warn" size={16} style={{ color: 'var(--warn)' }} />
-              <span>
-                Узел <b className="mono">{node.name}</b> просится в сеть — сверь отпечаток ключа
-              </span>
-              <button className="btn sm" type="button" onClick={() => setSel({ type: 'pending', id: node.id })}>
-                Проверить
-              </button>
-            </div>
-          ))}
-          {down.slice(0, 3).map((node) => (
-            <div key={node.id} className="notice err">
-              <Icon name="alert" size={16} style={{ color: 'var(--err)' }} />
-              <span>
-                <b className="mono">{node.name}</b>: нет туннеля до панели
-                {node.last_seen_at ? '' : ', агент не подключался'}
-              </span>
-              <button className="btn sm" type="button" onClick={() => setSel({ type: 'node', id: node.id })}>
-                Показать
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
 
       <div className="map-wrap">
         <section className="panel map-panel" aria-label="Карта соединений">

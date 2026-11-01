@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext'
 import { formatAgo } from '../lib/format'
 import { MeshProvider, useMesh } from '../lib/mesh'
 import { clientState, nodeState } from '../lib/model'
+import { useMeshAlerts } from '../lib/useMeshAlerts'
 import { useTheme } from '../theme/ThemeContext'
 import { CommandPalette } from './CommandPalette'
 import { Icon } from './Icon'
@@ -109,7 +110,10 @@ function Rail({ onSearch }) {
 function Shell() {
   const location = useLocation()
   const [palette, setPalette] = useState(false)
-  const { clients, nodes, error } = useMesh()
+  const { clients, nodes } = useMesh()
+  // Trouble arrives as notices at the bottom, never as a banner that pushes
+  // the page down: the map already shows it in red.
+  useMeshAlerts()
 
   useEffect(() => {
     function onKey(event) {
@@ -153,7 +157,6 @@ function Shell() {
             </NavLink>
           )}
         </div>
-        {error && <div className="notice err">{error}</div>}
         {/* Remounting on pathname replays the enter animation on every route change. */}
         <div className="view stack-lg" key={location.pathname}>
           <Outlet />

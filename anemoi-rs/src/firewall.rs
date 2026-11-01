@@ -421,6 +421,17 @@ impl Firewall for Iptables {
                 "iptables",
                 &["-A", CHAIN, "-i", dev, "-s", s, "-j", "ACCEPT"],
             )?;
+            // Leave the LAN's addresses alone on the way into the tunnel. NDMS
+            // masquerades its home segment out of every interface but its own
+            // bridge (`_NDM_MASQ: -s <LAN> ! -o br0`), which would hand the
+            // other site the node's transit address instead: the hub would
+            // not recognise the flow as the link's, and a node-to-node link
+            // could never be answered. Our chain runs first in POSTROUTING, so
+            // an ACCEPT here ends NAT for these packets before NDMS sees them.
+            run(
+                "iptables",
+                &["-t", "nat", "-A", CHAIN, "-o", dev, "-d", s, "-j", "ACCEPT"],
+            )?;
         }
         ensure_tunnel_rules(&plan.tunnel_networks())
     }

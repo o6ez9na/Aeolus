@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.models.node import ClientNodeGrant, ClientStatus, Node, NodeStatus
 from app.services import exits, openvpn, routing
+from app.services import links as links_service
 
 # Either form makes OpenVPN send everything to the node: the two halves are what
 # redirect-gateway def1 style setups use, so they win over a plain default.
@@ -63,6 +64,20 @@ def _normalise(network: str) -> str:
         return str(ipaddress.ip_network(network, strict=False))
     except ValueError:
         return network
+
+
+# The first anemoi that forwards between its LAN and other sites (site-subnets).
+_LINKS_SINCE = (0, 3, 0)
+
+
+def _version(raw: str | None) -> tuple[int, ...]:
+    parts = []
+    for piece in (raw or "").split("."):
+        digits = "".join(ch for ch in piece if ch.isdigit())
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
 
 
 def _read(path: Path) -> str | None:
@@ -135,6 +150,18 @@ async def build(session: AsyncSession, node: Node) -> dict:
             content = _read(config_dir / name)
             if content is not None:
                 files.append({"name": name, "content": content})
+        shared = links_service.site_networks(node)
+        linked = await links_service.of_node(session, node.id)
+        checks.append(
+            _check(
+                "site_lan",
+                "ok" if shared else "unknown",
+                "Сеть панели для связей",
+                (", ".join(shared) + f"; связанных узлов: {len(linked)}")
+                if shared
+                else "не задана: узлы можно связать только между собой",
+            )
+        )
         plan = _read(config_dir / "routing.json")
         if plan is not None:
             files.append({"name": "routing.json", "content": plan})
@@ -212,6 +239,40 @@ async def build(session: AsyncSession, node: Node) -> dict:
                 )
             )
 
+    site_links = await links_service.of_node(session, node.id)
+    everyone = {n.id: n for n in await session.scalars(select(Node))} if site_links else {}
+    for link in site_links:
+        peer = everyone.get(link.other(node.id))
+        if peer is None:
+            continue
+        title = "Связь с сетью панели" if peer.is_hub else f"Связь сетей с {peer.name}"
+        nets = ", ".join(links_service.site_networks(peer)) or "—"
+        if _version(node.agent_version) < _LINKS_SINCE:
+            checks.append(
+                _check(
+                    f"link:{peer.name}",
+                    "fail",
+                    title,
+                    f"агент {node.agent_version or '?'} не умеет связи сетей: "
+                    "нужен anemoi 0.3.0 или новее, переустанови узел",
+                )
+            )
+        elif not peer.is_enabled or peer.status == NodeStatus.disabled:
+            checks.append(_check(f"link:{peer.name}", "warn", title, f"{peer.name} выключен"))
+        elif not connected:
+            checks.append(
+                _check(f"link:{peer.name}", "unknown", title, "проверится, когда поднимется транзит")
+            )
+        else:
+            checks.append(
+                _check(
+                    f"link:{peer.name}",
+                    "ok",
+                    title,
+                    nets + (" (через NAT панели)" if peer.is_hub else ""),
+                )
+            )
+
     checks.append(_cert_check("agent_cert", "Сертификат агента", node.agent_cert_not_after))
 
     node_is_exit = any(n.id == node.id for n in await exits.remote_exit_nodes(session))
@@ -221,7 +282,11 @@ async def build(session: AsyncSession, node: Node) -> dict:
             "name": "ccd-transit (хаб)",
             "content": ccd
             if ccd is not None
-            else openvpn.render_transit_ccd(node, is_exit=node_is_exit),
+            else openvpn.render_transit_ccd(
+                node,
+                is_exit=node_is_exit,
+                site_routes=links_service.remote_networks(node, site_links, everyone),
+            ),
         }
     )
     hub = await session.scalar(select(Node).where(Node.is_hub.is_(True)))

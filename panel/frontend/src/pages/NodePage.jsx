@@ -273,6 +273,166 @@ function ClientDns({ node, editable }) {
   )
 }
 
+// The first anemoi that forwards between its LAN and linked sites.
+const LINKS_SINCE = [0, 3, 0]
+
+function versionAtLeast(raw, want) {
+  const have = String(raw ?? '')
+    .split('.')
+    .map((part) => parseInt(part, 10))
+  for (let i = 0; i < want.length; i += 1) {
+    const value = Number.isNaN(have[i]) || have[i] === undefined ? 0 : have[i]
+    if (value !== want[i]) return value > want[i]
+  }
+  return true
+}
+
+const linkOf = (links, a, b) =>
+  links.find(
+    (link) =>
+      (link.node_a_id === a.id && link.node_b_id === b.id) ||
+      (link.node_a_id === b.id && link.node_b_id === a.id),
+  )
+
+/**
+ * Site links of an ordinary node: its LAN and the panel's, or another node's,
+ * reaching each other over the transit, with no VPN client on any device.
+ */
+function SiteLinks({ node, editable }) {
+  const mesh = useMesh()
+  const [busy, setBusy] = useState(null)
+  const hub = mesh.nodes.find((n) => n.is_hub)
+  const peers = [
+    hub,
+    ...mesh.nodes.filter((n) => !n.is_hub && n.id !== node.id && n.approval === 'approved'),
+  ].filter(Boolean)
+  const linked = peers.filter((peer) => linkOf(mesh.links, node, peer))
+  const oldAgent = !versionAtLeast(node.agent_version, LINKS_SINCE)
+
+  const toggle = (peer) => {
+    const link = linkOf(mesh.links, node, peer)
+    setBusy(peer.id)
+    void (link ? mesh.unlinkNodes(link) : mesh.linkNodes(node, peer))
+      .catch(() => {})
+      .finally(() => setBusy(null))
+  }
+
+  return (
+    <section className="panel panel-pad stack" aria-label="Связь сетей">
+      <h2 style={{ fontSize: 15 }}>Связь сетей</h2>
+      <div className="bleed">
+        {peers.map((peer) => {
+          const on = Boolean(linkOf(mesh.links, node, peer))
+          const nets = peer.site_networks
+          const blocked = !on && (nets.length === 0 || node.subnets.length === 0)
+          const disabled = !editable || busy !== null || blocked
+          return (
+            <button
+              key={peer.id}
+              type="button"
+              className="trow"
+              aria-pressed={on}
+              aria-disabled={disabled}
+              onClick={() => !disabled && toggle(peer)}
+            >
+              <span className={on ? 'sw on' : 'sw'} />
+              <span className="t-main">
+                <span className={`t-title${peer.is_hub ? '' : ' mono'}`}>
+                  {peer.is_hub ? 'Сеть панели' : peer.name}
+                </span>
+                <span className={`t-sub${nets.length ? ' mono' : ''}`}>
+                  {nets.length
+                    ? `${nets.join(', ')} · ${peer.is_hub ? 'отсюда туда, через NAT панели' : 'в обе стороны'}`
+                    : peer.is_hub
+                      ? 'сеть панели не задана — укажи её на странице панели'
+                      : 'узел не объявил сетей'}
+                </span>
+              </span>
+              {busy === peer.id && <span className="hint">…</span>}
+            </button>
+          )
+        })}
+      </div>
+      <span className="hint">
+        {node.subnets.length
+          ? `Устройства сети ${node.subnets.join(', ')} откроют адреса связанных сетей без VPN-клиента: трафик идёт по транзиту через панель. После изменения узел переподключит транзит, чтобы получить маршруты.`
+          : 'Узел не объявил ни одной сети: связывать нечего.'}
+      </span>
+      {oldAgent && linked.length > 0 && (
+        <span className="hint warn-text">
+          Агент {node.agent_version || '?'} не умеет связи сетей: переустанови узел командой с
+          этой страницы узлов, нужен anemoi 0.3.0 или новее.
+        </span>
+      )}
+    </section>
+  )
+}
+
+/** The hub's side of site links: which of its networks the linked sites reach. */
+function HubLan({ node, editable }) {
+  const mesh = useMesh()
+  const saved = node.site_subnets.join(', ')
+  const [draft, setDraft] = useState(saved)
+  const [busy, setBusy] = useState(false)
+  const networks = draft.split(/[\s,;]+/).filter(Boolean)
+  const linkedNames = mesh.links
+    .filter((link) => link.node_a_id === node.id || link.node_b_id === node.id)
+    .map((link) => (link.node_a_id === node.id ? link.node_b_name : link.node_a_name))
+
+  const save = async () => {
+    setBusy(true)
+    try {
+      const updated = await mesh.updateNode(
+        node,
+        { site_subnets: networks },
+        networks.length
+          ? `Сеть панели для связей: ${networks.join(', ')}`
+          : 'Сеть панели для связей убрана',
+      )
+      setDraft(updated.site_subnets.join(', '))
+    } catch {
+      // reported by the mesh
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="panel panel-pad stack" aria-label="Сеть панели для связей">
+      <h2 style={{ fontSize: 15 }}>Сеть панели для связей</h2>
+      <form
+        className="row-wrap"
+        style={{ flexWrap: 'nowrap' }}
+        onSubmit={(event) => {
+          event.preventDefault()
+          void save()
+        }}
+      >
+        <input
+          className="input mono"
+          style={{ height: 34 }}
+          placeholder="192.168.1.0/24"
+          aria-label="Сети за панелью"
+          value={draft}
+          disabled={!editable}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        {editable && (
+          <button className="btn sm primary" type="submit" disabled={busy || networks.join(', ') === saved}>
+            Сохранить
+          </button>
+        )}
+      </form>
+      <span className="hint">
+        Локальная сеть, в которой стоит панель. Узлы, связанные с ней, открывают эти адреса без
+        VPN-клиента; устройства здесь видят их запросы с адреса панели. Клиентам VPN эта настройка
+        маршрутов не добавляет.
+        {linkedNames.length ? ` Связаны: ${linkedNames.join(', ')}.` : ' Пока ни один узел не связан.'}
+      </span>
+    </section>
+  )
+}
+
 function Events({ nodeId }) {
   const log = useResource(`/audit?target_id=${nodeId}&limit=8`, { pollMs: 30000 })
   const items = log.data?.items ?? []
@@ -562,6 +722,10 @@ export function NodePage() {
           </section>
 
           {node.is_hub && <ClientDns node={node} editable={editable} />}
+
+          {node.is_hub && <HubLan node={node} editable={editable} />}
+
+          {!node.is_hub && node.approval === 'approved' && <SiteLinks node={node} editable={editable} />}
 
           {!node.is_hub && (
             <section className="panel panel-pad stack" aria-label="Транзит">

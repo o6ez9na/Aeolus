@@ -6,6 +6,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -76,6 +77,12 @@ class Node(Base, UUIDMixin, TimestampMixin):
     wan_iface: Mapped[str | None] = mapped_column(String(32))
     # LANs behind this node, as CIDR strings. Routed into its transit tunnel.
     subnets: Mapped[list[str] | None] = mapped_column(JSON)
+    # What this site shares with the sites it is linked to (NodeLink). NULL
+    # means its announced subnets. The hub announces none, because a client
+    # with a grant to the hub would be handed routes to them, and its own LAN
+    # would win over a laptop's home Wi-Fi on the same addresses; so the hub's
+    # LAN is set here, for links only.
+    site_subnets: Mapped[list[str] | None] = mapped_column(JSON)
 
     # SHA-256 of the agent's public key. The agent prints the same value on the
     # node, so an operator can compare the two before accepting a request.
@@ -153,6 +160,35 @@ class Node(Base, UUIDMixin, TimestampMixin):
     grants: Mapped[list["ClientNodeGrant"]] = relationship(
         back_populates="node", cascade="all, delete-orphan"
     )
+
+
+class NodeLink(Base, UUIDMixin, TimestampMixin):
+    """Two sites whose networks reach each other over the transit.
+
+    The hub is a node as well, so a link to it opens the panel's LAN. Traffic
+    goes node -> hub -> node through the transit tunnels: the hub routes it by
+    the iroutes it already holds and pushes each node a route to the other side.
+    Unordered: (a, b) and (b, a) are the same link, stored with a < b.
+    """
+
+    __tablename__ = "node_links"
+    __table_args__ = (
+        UniqueConstraint("node_a_id", "node_b_id", name="uq_node_link"),
+        CheckConstraint("node_a_id < node_b_id", name="ck_node_link_ordered"),
+    )
+
+    node_a_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), index=True
+    )
+    node_b_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), index=True
+    )
+
+    node_a: Mapped[Node] = relationship(foreign_keys=[node_a_id])
+    node_b: Mapped[Node] = relationship(foreign_keys=[node_b_id])
+
+    def other(self, node_id: uuid.UUID) -> uuid.UUID:
+        return self.node_b_id if self.node_a_id == node_id else self.node_a_id
 
 
 class ClientStatus(str, enum.Enum):

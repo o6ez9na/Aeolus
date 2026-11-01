@@ -8,6 +8,7 @@ from app.models.node import (
     ClientStatus,
     Node,
     NodeApproval,
+    NodeLink,
     NodeRole,
     NodeStatus,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "ClientStatus",
     "Node",
     "NodeApproval",
+    "NodeLink",
     "NodeRole",
     "NodeStatus",
     "RefreshToken",

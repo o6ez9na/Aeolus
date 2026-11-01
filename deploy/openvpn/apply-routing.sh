@@ -97,10 +97,36 @@ while [ "$i" -lt "$count" ]; do
     i=$((i + 1))
 done
 
+# --- site links -------------------------------------------------------------
+# A node's LAN reaching another site through the hub. Into the hub's own LAN it
+# is masqueraded: the devices there answer only their own gateway, which has
+# never heard of the node's addresses. A plan from an older panel has no
+# "links", and jq counts that as zero.
+links=$(jqr '.links | length')
+j=0
+while [ "$j" -lt "$links" ]; do
+    nat=$(jqr ".links[$j].nat")
+    for src in $(jqr ".links[$j].src[]?"); do
+        for dst in $(jqr ".links[$j].dst[]?"); do
+            iptables -A "$CHAIN" -s "$src" -d "$dst" -j ACCEPT
+            if [ "$nat" = true ]; then
+                iptables -t nat -A "$NAT_CHAIN" -s "$src" -d "$dst" -o "$UPLINK" -j MASQUERADE
+            fi
+        done
+    done
+    j=$((j + 1))
+done
+
 # Anything in our pools that nothing above accepted stops here. Scoped to the
 # pools so a shared host's own forwarding is left alone.
 for pool in "$POOL" "$POOL_TCP"; do
     iptables -A "$CHAIN" -s "$pool" -j DROP
+done
+
+# Same for the sites behind the nodes: a node's LAN starts nothing through the
+# hub except over a link. Replies to clients were let through at the top.
+for net in $(jqr '.mesh[]?'); do
+    iptables -A "$CHAIN" -s "$net" -j DROP
 done
 
 # --- policy routing ---------------------------------------------------------
@@ -131,4 +157,4 @@ while [ "$i" -lt "$count" ]; do
     i=$((i + 1))
 done
 
-echo "routing plan applied: $(jqr '.revision') ($count clients)"
+echo "routing plan applied: $(jqr '.revision') ($count clients, $links site links)"

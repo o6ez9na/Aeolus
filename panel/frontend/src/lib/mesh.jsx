@@ -18,6 +18,7 @@ export function MeshProvider({ children }) {
   const [nodes, setNodes] = useState(null)
   const [clients, setClients] = useState(null)
   const [groups, setGroups] = useState(null)
+  const [links, setLinks] = useState(null)
   const [layout, setLayoutState] = useState(null)
   const [error, setError] = useState(null)
   const [updatedAt, setUpdatedAt] = useState(null)
@@ -34,10 +35,16 @@ export function MeshProvider({ children }) {
 
   const reload = useCallback(async () => {
     try {
-      const [n, c, g] = await Promise.all([api.get('/nodes'), api.get('/clients'), api.get('/groups')])
+      const [n, c, g, l] = await Promise.all([
+        api.get('/nodes'),
+        api.get('/clients'),
+        api.get('/groups'),
+        api.get('/links'),
+      ])
       setIfChanged('nodes', n, setNodes)
       setIfChanged('clients', c, setClients)
       setIfChanged('groups', g, setGroups)
+      setIfChanged('links', l, setLinks)
       setError(null)
       setUpdatedAt(Date.now())
     } catch (err) {
@@ -224,6 +231,17 @@ export function MeshProvider({ children }) {
           () => api.patch(`/ccd/${grant.grant_id}`, { networks }),
           networks ? `${label}: доступ сужен до ${networks.join(', ')}` : `${label}: снова вся сеть узла`,
         ),
+      /** Site link: the two nodes' networks reach each other over the transit. */
+      linkNodes: (a, b) =>
+        run(
+          () => api.post('/links', { node_a_id: a.id, node_b_id: b.id }),
+          `${a.name} ↔ ${b.name}: сети связаны, узлы переподключат транзит`,
+        ),
+      unlinkNodes: (link) =>
+        run(
+          () => api.delete(`/links/${link.id}`),
+          `${link.node_a_name} ↔ ${link.node_b_name}: связь снята`,
+        ),
       reissueServerCert: (node) =>
         run(
           () => api.post(`/pki/nodes/${node.id}/certificate`),
@@ -238,16 +256,17 @@ export function MeshProvider({ children }) {
       nodes,
       clients,
       groups,
+      links: links ?? [],
       layout,
       setLayout,
       error,
       updatedAt,
-      loading: nodes === null || clients === null || groups === null,
+      loading: nodes === null || clients === null || groups === null || links === null,
       reload,
       nodeName,
       ...actions,
     }),
-    [nodes, clients, groups, layout, setLayout, error, updatedAt, reload, nodeName, actions],
+    [nodes, clients, groups, links, layout, setLayout, error, updatedAt, reload, nodeName, actions],
   )
 
   return <MeshContext.Provider value={value}>{children}</MeshContext.Provider>

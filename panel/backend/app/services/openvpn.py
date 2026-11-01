@@ -278,12 +278,19 @@ verb 3
 """
 
 
-def render_transit_ccd(node: Node, *, is_exit: bool = False) -> str:
+def render_transit_ccd(
+    node: Node, *, is_exit: bool = False, site_routes: list[str] | None = None
+) -> str:
     """The hub's ccd entry for one node: its address and the LANs behind it.
 
     An exit node also gets the default route: OpenVPN picks the peer for a
     packet by destination only, and without it drops internet-bound traffic
     that policy routing has already sent into the tunnel (see services/exits).
+
+    ``site_routes`` are the networks of the sites this node is linked to
+    (services/links): pushed to the node, so its LAN finds them through the
+    transit. The hub drops a node's session when this file changes, which is
+    what gets a new route to the node.
     """
     if node.transit_host is None:
         return f"# {node.name}: no transit address assigned\ndisable\n"
@@ -298,6 +305,11 @@ def render_transit_ccd(node: Node, *, is_exit: bool = False) -> str:
     if is_exit:
         lines.append("# выход в интернет для клиентов хаба")
         lines.append("iroute 0.0.0.0 0.0.0.0")
+    if site_routes:
+        lines.append("# связи сетей: маршруты к связанным площадкам")
+        for subnet in site_routes:
+            net = ipaddress.ip_network(subnet, strict=False)
+            lines.append(f'push "route {net.network_address} {net.netmask}"')
     return "\n".join(lines) + "\n"
 
 

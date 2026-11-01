@@ -27,6 +27,7 @@ from app.models.node import (
 )
 from app.services import ccd as ccd_service
 from app.services import exits as exits_service
+from app.services import links as links_service
 from app.services import openvpn, pki, routing
 from app.services.groups import grant_networks
 
@@ -287,6 +288,9 @@ async def build_config(session: AsyncSession, node: Node) -> dict:
         # A node NATs the hub's client pools out its own uplink: that is what
         # "this client's internet leaves through that node" means on the wire.
         "nat_subnets": [] if node.is_hub else routing.node_nat_subnets(),
+        # The networks of the sites this node is linked to: its LAN may reach
+        # them through the transit. The route itself comes pushed by the hub.
+        "site_subnets": [] if node.is_hub else await _site_subnets(session, node),
     }
 
     # The CRL carries a timestamp, so hashing it would change the revision on
@@ -303,12 +307,23 @@ async def build_config(session: AsyncSession, node: Node) -> dict:
         digest.update(payload[key].encode())
     for subnet in payload["nat_subnets"]:
         digest.update(subnet.encode())
+    # Prefixed so that a list moving from one field to the other is a change.
+    for subnet in payload["site_subnets"]:
+        digest.update(f"site:{subnet}".encode())
     for entries in (ccd, ccd_tcp, ccd_transit):
         for name in sorted(entries):
             digest.update(name.encode())
             digest.update(entries[name].encode())
     payload["revision"] = digest.hexdigest()[:32]
     return payload
+
+
+async def _site_subnets(session: AsyncSession, node: Node) -> list[str]:
+    site_links = await links_service.of_node(session, node.id)
+    if not site_links:
+        return []
+    everyone = {n.id: n for n in await session.scalars(select(Node))}
+    return links_service.remote_networks(node, site_links, everyone)
 
 
 async def _build_transit(
@@ -333,8 +348,15 @@ async def _build_transit(
             )
         )
         exits = {n.id for n in await exits_service.remote_exit_nodes(session)}
+        site_links = await links_service.load(session)
+        everyone = {n.id: n for n in await session.scalars(select(Node))}
         entries = {
-            n.name: openvpn.render_transit_ccd(n, is_exit=n.id in exits) for n in nodes
+            n.name: openvpn.render_transit_ccd(
+                n,
+                is_exit=n.id in exits,
+                site_routes=links_service.remote_networks(n, site_links, everyone),
+            )
+            for n in nodes
         }
         return openvpn.render_transit_server_config(nodes), entries
 

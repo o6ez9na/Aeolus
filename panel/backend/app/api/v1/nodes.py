@@ -16,6 +16,7 @@ from app.schemas.node import (
     NodeUpdate,
 )
 from app.services import agent, audit, diagnostics, openvpn, pki
+from app.services import links as links_service
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 
@@ -112,6 +113,7 @@ def _read(node: Node, connected: set[str]) -> NodeRead:
     )
     if node.is_hub:
         data.client_dns_default = [settings.vpn_dns]
+    data.site_networks = links_service.site_networks(node)
     return data
 
 
@@ -142,8 +144,27 @@ async def update_node(
     if "client_dns" in changes and not node.is_hub:
         # Only the hub runs the client listener, so nothing would push them.
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "DNS for clients is set on the hub")
+    if "site_subnets" in changes and not node.is_hub:
+        # A node shares what it announces: the hub routes back to it by those
+        # iroutes, and a network it does not announce would have no way back.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "a node shares the subnets it announces"
+        )
     for field, value in changes.items():
         setattr(node, field, value)
+
+    if "site_subnets" in changes:
+        # The hub's LAN moved under links that already exist: they must still
+        # make sense with it.
+        try:
+            links_service.check_networks(node, node.site_subnets or [])
+            for link in await links_service.of_node(session, node.id):
+                peer = await session.get(Node, link.other(node.id))
+                if peer is not None:
+                    await links_service.validate(session, node, peer, ignore=link.id)
+        except links_service.LinkError as exc:
+            await session.rollback()
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
 
     await audit.record(
         session,

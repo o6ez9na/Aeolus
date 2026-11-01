@@ -38,6 +38,25 @@ class NodeUpdate(BaseModel):
     transit_obfuscated: bool | None = None
     # Hub only. Sent as null or [] to go back to the panel-wide default.
     client_dns: list[str] | None = Field(default=None, max_length=4)
+    # Hub only: its LAN, offered to the sites linked to it. [] or null clears it.
+    site_subnets: list[str] | None = Field(default=None, max_length=16)
+
+    @field_validator("site_subnets")
+    @classmethod
+    def _site_subnets_are_networks(cls, value: list[str] | None) -> list[str] | None:
+        if not value:
+            return None
+        networks: list[str] = []
+        for raw in value:
+            try:
+                net = ipaddress.ip_network(raw.strip(), strict=False)
+            except ValueError:
+                raise ValueError(f"{raw!r} is not a network") from None
+            if net.version != 4:
+                raise ValueError(f"{raw!r}: only IPv4 networks are routed")
+            if str(net) not in networks:
+                networks.append(str(net))
+        return networks
 
     @field_validator("client_dns")
     @classmethod
@@ -95,8 +114,13 @@ class NodeRead(NodeBase):
     # Empty means the hub pushes client_dns_default instead.
     client_dns: list[str] = []
     client_dns_default: list[str] = []
+    # Set on the hub only (its LAN, for site links).
+    site_subnets: list[str] = []
+    # What this site shares over its links: site_subnets on the hub, the
+    # announced subnets anywhere else.
+    site_networks: list[str] = []
 
-    @field_validator("subnets", "client_dns", mode="before")
+    @field_validator("subnets", "client_dns", "site_subnets", mode="before")
     @classmethod
     def _null_list_is_empty(cls, value: list[str] | None) -> list[str]:
         # NULL in the column means "never set", which the UI renders the same
@@ -124,6 +148,26 @@ class NodeDiagnostics(BaseModel):
     files: list[NodeFile]
     # Clients whose whole internet leaves through this node.
     exit_for: list[str] = []
+
+
+class NodeLinkCreate(BaseModel):
+    node_a_id: uuid.UUID
+    node_b_id: uuid.UUID
+
+
+class NodeLinkRead(BaseModel):
+    """A site link, with both ends spelled out for the UI."""
+
+    id: uuid.UUID
+    node_a_id: uuid.UUID
+    node_b_id: uuid.UUID
+    node_a_name: str
+    node_b_name: str
+    networks_a: list[str]
+    networks_b: list[str]
+    # Masqueraded into the hub's LAN: one end is the hub.
+    nat: bool
+    created_at: datetime
 
 
 class EnrollmentToken(BaseModel):

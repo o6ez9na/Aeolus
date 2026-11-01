@@ -22,6 +22,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.models.node import Client, ClientNodeGrant, ClientStatus, Node, NodeApproval
+from app.services import links as links_service
 from app.services.groups import grant_networks
 
 
@@ -130,6 +131,9 @@ async def build_plan(session: AsyncSession) -> dict:
         "mesh": sorted(set(mesh)),
         "clients": entries,
         "hub": hub.name if hub else None,
+        # Site links: what a node's LAN may start through the hub, and whether
+        # it has to be masqueraded on the way (into the hub's own LAN).
+        "links": links_service.hub_rules(await links_service.load(session), nodes),
     }
     plan["revision"] = _digest(plan)
     return plan

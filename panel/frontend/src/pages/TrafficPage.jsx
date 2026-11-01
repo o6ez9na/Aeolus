@@ -33,10 +33,7 @@ export function TrafficPage() {
 
   return (
     <>
-      <PageHead
-        title="Трафик"
-        sub="Счётчики живых сессий и агентов. Истории пока нет: после переподключения счёт начинается заново."
-      />
+      <PageHead title="Трафик" />
       <div className="tiles">
         <div className="panel tile">
           <span className="lbl">Сессий сейчас</span>

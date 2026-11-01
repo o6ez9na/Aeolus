@@ -89,7 +89,6 @@ export function PkiPage() {
     <>
       <PageHead
         title="PKI"
-        sub="Панель — собственный удостоверяющий центр. Отзыв доходит до узла с новым CRL сразу."
         actions={
           <>
             <button className="btn" type="button" onClick={() => authorizedDownload('/pki/ca.crt', 'ca.crt').catch(toast.error)}>
@@ -184,7 +183,6 @@ export function PkiPage() {
       <section className="panel" style={{ overflow: 'hidden' }} aria-label="Клиентские сертификаты">
         <div className="panel-head panel-pad" style={{ paddingBottom: 8 }}>
           <h2>Клиентские сертификаты</h2>
-          <span className="hint">новый клиент получает сертификат сразу в мастере создания</span>
         </div>
         <div className="table-wrap">
           <table className="table" style={{ minWidth: 600 }}>

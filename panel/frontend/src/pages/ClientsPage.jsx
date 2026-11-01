@@ -296,11 +296,7 @@ function NewClient({ onClose, onCreated, initialGroup }) {
               Скопировать
             </button>
           </div>
-          <span className="hint">
-            {password.length < 8
-              ? 'Пароль короче 8 символов.'
-              : 'Он же будет виден на странице клиента.'}
-          </span>
+          {password.length < 8 && <span className="hint">Пароль короче 8 символов.</span>}
         </div>
 
         <div className="bleed">
@@ -541,7 +537,6 @@ export function ClientsPage() {
       <section className="panel panel-pad stack" aria-label="Группы">
         <div className="panel-head">
           <h2>Группы</h2>
-          <span className="hint">роль: доступы задаются у группы, участники получают их сами</span>
         </div>
         <div className="group-strip">
           {(mesh.groups ?? []).map((group) => {
@@ -822,11 +817,6 @@ export function ClientsPage() {
               })}
             </tbody>
           </table>
-        </div>
-        <div className="toolbar" style={{ borderBottom: 0, borderTop: '1px solid var(--line)' }}>
-          <span className="hint">
-            Трафик — счётчики текущей сессии на хабе, после переподключения они начинаются заново.
-          </span>
         </div>
       </section>
 

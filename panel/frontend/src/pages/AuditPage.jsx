@@ -127,7 +127,7 @@ export function AuditPage() {
 
   return (
     <>
-      <PageHead title="Аудит" sub="Каждое изменение пишется в той же транзакции, что и само изменение." />
+      <PageHead title="Аудит" />
       <section className="panel" style={{ overflow: 'hidden' }}>
         <div className="toolbar">
           {FAMILIES.map(([value, label]) => (

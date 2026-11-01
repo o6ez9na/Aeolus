@@ -182,11 +182,7 @@ export function HubInspector({ hub, onSelect }) {
   }
   return (
     <section className="stack-lg">
-      <Head
-        dot={dotClass(nodeState(hub))}
-        name={hub.name}
-        sub="Сама панель: хаб, через который идут все клиенты"
-      />
+      <Head dot={dotClass(nodeState(hub))} name={hub.name} />
       <Meta
         items={[
           ['Домен', hub.address, true],
@@ -203,7 +199,6 @@ export function HubInspector({ hub, onSelect }) {
         <span className="lbl">Выходят в интернет через панель</span>
         <ClientChips clients={exits} nodeId={hub.id} onSelect={onSelect} />
       </div>
-      <span className="hint">Панель тоже узел: клиенту можно выдать выход прямо через неё.</span>
       <Link className="btn" to={`/nodes/${hub.id}`}>
         Проверки и конфиги хаба
       </Link>
@@ -275,7 +270,7 @@ export function InternetInspector({ onSelect }) {
     .filter((row) => row.exit && clientUsable(row.client))
   return (
     <section className="stack-lg">
-      <Head name="Интернет" mono={false} sub="Кто через какой узел выходит наружу" />
+      <Head name="Интернет" mono={false} />
       <div className="stack" style={{ gap: 6 }}>
         {rows.length === 0 && <span className="hint">Через VPN наружу никто не выходит.</span>}
         {rows.map(({ client, exit }) => (
@@ -295,9 +290,6 @@ export function InternetInspector({ onSelect }) {
           </button>
         ))}
       </div>
-      <span className="hint">
-        У клиента один выход. Протяни клиента к «Интернету» на карте или смени выход в его карточке.
-      </span>
     </section>
   )
 }
@@ -383,11 +375,6 @@ export function TransitInspector({ node, hub, onSelect }) {
           )}
         </span>
       )}
-      <span className="hint">
-        {link
-          ? `Устройства ${node.subnets.join(', ')} открывают ${hub.site_networks.join(', ')} без VPN-клиента. В сети панели их запросы видны с адреса панели; оттуда в сеть узла соединения не начинаются.`
-          : 'Включишь — узел переподключит транзит и получит маршрут в сеть панели. Клиентам VPN это ничего не меняет.'}
-      </span>
       {link && oldAgent && (
         <div className="callout warn">
           Агент {node.agent_version || '?'} получает маршрут, но не пропускает трафик: переустанови узел

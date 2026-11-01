@@ -66,7 +66,6 @@ function Editor({ entry, limits, editable, onSaved, onClose }) {
             disabled={!editable}
             onChange={(event) => setStaticHost(event.target.value)}
           />
-          <span className="hint">Выше этого диапазона — пул, который OpenVPN раздаёт сам.</span>
         </label>
         <label className="field">
           Маршруты клиенту
@@ -144,7 +143,6 @@ export function CcdPage() {
     <>
       <PageHead
         title="Доступ (ccd)"
-        sub="Что клиент получает при подключении: закреплённый адрес, маршруты и push-опции. Клиент без доступа получает disable."
         actions={
           filteredName && (
             <button className="btn sm" type="button" onClick={() => set('client', null)}>

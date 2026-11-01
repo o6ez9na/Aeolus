@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { api, apiText } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import { daysUntil, formatAgo, formatBytes, formatDate, formatSince } from '../lib/format'
+import { formatAgo, formatBytes, formatDate, formatSince } from '../lib/format'
 import { useMesh } from '../lib/mesh'
 import {
   CLIENT_STATE_LABEL,
@@ -182,7 +182,6 @@ export function ClientInspector({ client }) {
     .sort((a, b) => Number(b.is_hub) - Number(a.is_hub) || a.name.localeCompare(b.name))
   const bytes = sessionBytes(client)
   const nets = clientNetworks(client)
-  const certDays = daysUntil(client.cert_not_after)
 
   async function act(fn) {
     setBusy(true)
@@ -276,11 +275,6 @@ export function ClientInspector({ client }) {
             </option>
           ))}
         </select>
-        {group && (
-          <span className="hint">
-            Получает всё, что даёт «{group.name}». Сверху можно выдать личные доступы.
-          </span>
-        )}
       </div>
 
       <div className="meta-grid">
@@ -406,13 +400,11 @@ export function ClientInspector({ client }) {
 
       <div className="stack" style={{ gap: 6 }}>
         <span className="lbl">Выход в интернет</span>
-        {groupExit && (
-          <div className="callout">
-            Выход задаёт группа «{group.name}»: весь трафик через{' '}
-            <span className="mono">{groupExit.node_name}</span>.
-          </div>
-        )}
-        <div className="bleed" style={{ gap: 4, opacity: groupExit ? 0.55 : 1 }}>
+        <div
+          className="bleed"
+          style={{ gap: 4, opacity: groupExit ? 0.55 : 1 }}
+          title={groupExit ? `Выход задаёт группа «${group.name}»` : undefined}
+        >
           <button
             type="button"
             className={`opt${exit ? '' : ' on'}`}
@@ -493,10 +485,6 @@ export function ClientInspector({ client }) {
               <Icon name="download" size={15} stroke={2} />
               Скачать {client.common_name}.ovpn
             </button>
-            <span className="hint">
-              Профиль один и ведёт на панель: доступ и выход меняются без перевыпуска.
-              {certDays !== null && ` Сертификат действует до ${formatDate(client.cert_not_after)}.`}
-            </span>
             <ProfileImport key={client.id} client={client} editable={editable} />
           </>
         ) : client.status === 'revoked' ? (

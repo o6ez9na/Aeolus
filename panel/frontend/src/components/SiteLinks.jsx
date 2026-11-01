@@ -88,11 +88,7 @@ export function SiteLinks({ node, editable, withHub = true, title = 'Транз�
     <section className="panel panel-pad stack" aria-label={title}>
       <h2 style={{ fontSize: 15 }}>{title}</h2>
       {rows}
-      <span className="hint">
-        {node.subnets.length
-          ? `Устройства сети ${node.subnets.join(', ')} откроют адреса связанных сетей без VPN-клиента: трафик идёт по транзиту через панель. После изменения узел переподключит транзит, чтобы получить маршруты.`
-          : 'Узел не объявил ни одной сети: связывать нечего.'}
-      </span>
+      {!node.subnets.length && <span className="hint">Узел не объявил ни одной сети: связывать нечего.</span>}
       {notes}
     </section>
   )

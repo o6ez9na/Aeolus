@@ -246,11 +246,6 @@ export function GroupEditor({ group, onSelectClient, onDeleted }) {
         </div>
       </div>
 
-      <span className="hint">
-        Участник получает всё, что даёт группа, и может иметь личные доступы сверху. Вышел из группы —
-        её доступы снялись, личные остались.
-      </span>
-
       {editable && (
         <ConfirmButton
           className="btn sm danger"

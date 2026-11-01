@@ -266,10 +266,6 @@ function ClientDns({ node, editable }) {
           </button>
         )}
       </form>
-      <span className="hint">
-        До четырёх адресов через запятую, по порядку. Пусто — {fallback}. Сервер в домашней сети
-        ответит только клиентам, у которых есть маршрут в эту сеть.
-      </span>
     </section>
   )
 }
@@ -281,9 +277,6 @@ function HubLan({ node, editable }) {
   const [draft, setDraft] = useState(saved)
   const [busy, setBusy] = useState(false)
   const networks = draft.split(/[\s,;]+/).filter(Boolean)
-  const linkedNames = mesh.links
-    .filter((link) => link.node_a_id === node.id || link.node_b_id === node.id)
-    .map((link) => (link.node_a_id === node.id ? link.node_b_name : link.node_a_name))
 
   const save = async () => {
     setBusy(true)
@@ -329,12 +322,6 @@ function HubLan({ node, editable }) {
           </button>
         )}
       </form>
-      <span className="hint">
-        Локальная сеть, в которой стоит панель. Узлы, связанные с ней, открывают эти адреса без
-        VPN-клиента; устройства здесь видят их запросы с адреса панели. Клиентам VPN эта настройка
-        маршрутов не добавляет.
-        {linkedNames.length ? ` Связаны: ${linkedNames.join(', ')}.` : ' Пока ни один узел не связан.'}
-      </span>
     </section>
   )
 }
@@ -616,15 +603,9 @@ export function NodePage() {
                   </span>
                 ))
               ) : (
-                <span className="hint">{node.is_hub ? 'У хаба своих сетей нет, он даёт выход.' : 'Не объявлены'}</span>
+                <span className="hint">{node.is_hub ? 'Нет' : 'Не объявлены'}</span>
               )}
             </div>
-            {!node.is_hub && (
-              <span className="hint">
-                Сети объявляет сам узел (AEOLUS_NODE_SUBNETS при установке): он про свою LAN знает
-                лучше панели.
-              </span>
-            )}
           </section>
 
           {node.is_hub && <ClientDns node={node} editable={editable} />}
@@ -662,10 +643,6 @@ export function NodePage() {
                   </button>
                 ))}
               </div>
-              <span className="hint">
-                HTTPS прячет OpenVPN внутри WebSocket: чуть медленнее, зато проходит там, где VPN
-                режут после рукопожатия.
-              </span>
             </section>
           )}
 

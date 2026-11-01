@@ -388,10 +388,7 @@ function MapView() {
 
   return (
     <>
-      <PageHead
-        title="Карта сети"
-        sub="Строится сама из сессий, транзитов и доступов. Карточки можно двигать."
-      />
+      <PageHead title="Карта сети" />
 
 
       <div className="map-wrap">
@@ -459,13 +456,11 @@ function MapView() {
               <Controls showInteractive={false} position="bottom-left" />
             </ReactFlow>
           </div>
-          <div className="toolbar" style={{ borderBottom: 0, borderTop: '1px solid var(--line)' }}>
-            <span className="hint">
-              {editable
-                ? 'Клиента в рамку — в группу, он получает её доступы. «+» у клиента или группы тяни к узлу — выдать доступ, к «Интернету» — выбрать выход. Клик по линии к узлу — транзит сетей.'
-                : 'Режим просмотра: менять доступы может оператор или админ.'}
-            </span>
-          </div>
+          {!editable && (
+            <div className="toolbar" style={{ borderBottom: 0, borderTop: '1px solid var(--line)' }}>
+              <span className="hint">Режим просмотра: менять доступы может оператор или админ.</span>
+            </div>
+          )}
         </section>
 
         <aside className="panel panel-pad map-side" aria-label="Свойства выбранного">
@@ -519,7 +514,6 @@ function ExitChooser({ nodes, title, current, onClose, onPick }) {
             <Icon name="close" />
           </button>
         </div>
-        <span className="hint">Доступ к выбранному узлу выдастся сам, если его ещё нет.</span>
         <div className="bleed" style={{ gap: 4 }}>
           {[null, ...choices].map((node) => (
             <button

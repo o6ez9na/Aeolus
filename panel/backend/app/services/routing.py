@@ -134,9 +134,40 @@ async def build_plan(session: AsyncSession) -> dict:
         # Site links: what a node's LAN may start through the hub, and whether
         # it has to be masqueraded on the way (into the hub's own LAN).
         "links": links_service.hub_rules(await links_service.load(session), nodes),
+        "hub_local": hub_local(hub),
     }
     plan["revision"] = _digest(plan)
     return plan
+
+
+def hub_local(hub: Node | None) -> list[str]:
+    """Destinations a client exiting through a node still reaches via the hub.
+
+    A node exit sends a client's whole default route into the transit. The
+    hub's own LAN and the resolvers the hub pushes are not internet, though:
+    the node has no route to them, so they would leave by its uplink and be
+    lost, and over a site link the node would hand them straight back to the
+    hub, which would send them to the node again. Without DNS such a client
+    has no internet at all. These stay on the hub.
+
+    A public resolver is left to the exit like any other internet address.
+    """
+    if hub is None:
+        return []
+    networks = [ipaddress.ip_network(net, strict=False) for net in links_service.site_networks(hub)]
+    from app.services.openvpn import client_dns
+
+    for server in client_dns(hub):
+        try:
+            address = ipaddress.ip_address(server)
+        except ValueError:
+            continue
+        if address.version != 4 or not address.is_private:
+            continue
+        if any(address in net for net in networks):
+            continue
+        networks.append(ipaddress.ip_network(f"{address}/32"))
+    return sorted({str(net) for net in networks})
 
 
 def _cidr(network: str) -> str:

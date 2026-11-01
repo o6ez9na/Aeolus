@@ -139,6 +139,32 @@ ip rule show | awk '$0 ~ /lookup (1[0-9][0-9]|[2-9][0-9][0-9])/ {print $0}' | wh
     esac
 done
 
+# Only the default route belongs to the node. Everything this namespace reaches
+# on its own stays here: the pools, the transit and the mesh routes (copied from
+# main, so client-to-client and node LAN traffic do not detour), and "hub_local"
+# — the hub's LAN and the private resolvers it pushes. Sent to the node, those
+# leave by its uplink and are lost, or come straight back over a site link and
+# loop; without DNS such a client has no internet at all.
+UPLINK_GW=$(ip -4 route show default | awk '{print $3; exit}')
+filled=" "
+fill_table() {
+    table=$1
+    via=$2
+    case "$filled" in *" $table "*) return 0 ;; esac
+    ip route flush table "$table" 2>/dev/null || true
+    ip -4 route show table main | grep -v '^default' | while read -r route; do
+        # shellcheck disable=SC2086 # a route is several words on purpose
+        ip route add $route table "$table" 2>/dev/null || true
+    done
+    if [ -n "$UPLINK_GW" ]; then
+        for net in $(jqr '.hub_local[]?'); do
+            ip route replace "$net" via "$UPLINK_GW" dev "$UPLINK" table "$table" 2>/dev/null || true
+        done
+    fi
+    ip route replace default via "$via" table "$table" 2>/dev/null || true
+    filled="$filled$table "
+}
+
 i=0
 while [ "$i" -lt "$count" ]; do
     exit_via=$(jqr ".clients[$i].exit_via")
@@ -149,7 +175,7 @@ while [ "$i" -lt "$count" ]; do
     # A table per node address: 10.10.0.2 -> 102, 10.10.0.3 -> 103.
     host=${exit_via##*.}
     table=$((TABLE_BASE + host))
-    ip route replace default via "$exit_via" table "$table" 2>/dev/null || true
+    fill_table "$table" "$exit_via"
 
     for addr in $(jqr ".clients[$i].address") $(jqr ".clients[$i].address_tcp"); do
         ip rule add from "$addr" table "$table" prio "$table" 2>/dev/null || true

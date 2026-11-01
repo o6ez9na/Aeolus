@@ -235,12 +235,12 @@ export function MeshProvider({ children }) {
       linkNodes: (a, b) =>
         run(
           () => api.post('/links', { node_a_id: a.id, node_b_id: b.id }),
-          `${a.name} ↔ ${b.name}: сети связаны, узлы переподключат транзит`,
+          `${a.name} ⇄ ${b.name}: транзит сетей включён, узел переподключится и получит маршруты`,
         ),
       unlinkNodes: (link) =>
         run(
           () => api.delete(`/links/${link.id}`),
-          `${link.node_a_name} ↔ ${link.node_b_name}: связь снята`,
+          `${link.node_a_name} ⇄ ${link.node_b_name}: транзит сетей выключен`,
         ),
       reissueServerCert: (node) =>
         run(

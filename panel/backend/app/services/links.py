@@ -105,7 +105,7 @@ async def validate(
             raise LinkError(f"{node.name}: узел не принят или выключен")
         if not site_networks(node):
             raise LinkError(
-                f"{node.name}: у панели не задана её сеть для связей"
+                f"{node.name}: у панели не задана её сеть для транзита сетей"
                 if node.is_hub
                 else f"{node.name}: узел не объявил ни одной сети"
             )

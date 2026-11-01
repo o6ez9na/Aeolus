@@ -16,7 +16,15 @@ import { ClientInspector } from '../components/ClientInspector'
 import { ConfirmButton } from '../components/ConfirmButton'
 import { GroupEditor } from '../components/GroupEditor'
 import { Icon } from '../components/Icon'
-import { HubInspector, InternetInspector, NodeInspector, PendingInspector } from '../components/map/MapInspectors'
+import { edgeTypes } from '../components/map/MapEdges'
+import {
+  HubInspector,
+  InternetInspector,
+  LinkInspector,
+  NodeInspector,
+  PendingInspector,
+  TransitInspector,
+} from '../components/map/MapInspectors'
 import { nodeTypes } from '../components/map/MapNodes'
 import { Modal } from '../components/Overlay'
 import { useToast } from '../components/Toast'
@@ -110,11 +118,13 @@ function MapView() {
   }, [layers])
 
   const prep = useMemo(() => prepare({ nodes, clients, groups: mesh.groups }), [nodes, clients, mesh.groups])
+  const links = mesh.links
   const graph = useMemo(
-    () => buildGraph({ prep, clients, layout, sel, layers, connectingFrom, dropGroup }),
+    () =>
+      buildGraph({ prep, clients, layout, sel, layers, connectingFrom, dropGroup, links, onOpenEdge: setSel }),
     // sel is rebuilt from the URL on every render; its key is what changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [prep, clients, layout, selKey(sel), layers, connectingFrom, dropGroup],
+    [prep, clients, layout, selKey(sel), layers, connectingFrom, dropGroup, links, setSel],
   )
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(graph.rfNodes)
@@ -327,6 +337,16 @@ function MapView() {
     [nodes, setSel],
   )
 
+  // A transit line opens its inspector: switching network transit on is one
+  // click there rather than a trip to the node's page.
+  const onEdgeClick = useCallback(
+    (_, edge) => {
+      if (edge.id.startsWith('t:')) setSel({ type: 'transit', id: edge.id.slice(2) })
+      else if (edge.id.startsWith('k:')) setSel({ type: 'link', id: edge.id.slice(2) })
+    },
+    [setSel],
+  )
+
   const relayout = useCallback(() => {
     savePositions(() => ({}))
     setTimeout(() => rf.fitView({ padding: 0.12, duration: 300 }), 80)
@@ -356,6 +376,10 @@ function MapView() {
         onDeleted={() => setSel(null)}
       />
     )
+  } else if (sel?.type === 'transit' && selectedNode && prep.hub) {
+    inspector = <TransitInspector key={selectedNode.id} node={selectedNode} hub={prep.hub} onSelect={setSel} />
+  } else if (sel?.type === 'link' && links.some((l) => l.id === sel.id)) {
+    inspector = <LinkInspector key={sel.id} link={links.find((l) => l.id === sel.id)} onSelect={setSel} />
   } else if (sel?.type === 'inet') {
     inspector = <InternetInspector onSelect={setSel} />
   } else {
@@ -440,8 +464,10 @@ function MapView() {
               nodes={rfNodes}
               edges={graph.rfEdges}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               onNodesChange={onNodesChange}
               onNodeClick={onNodeClick}
+              onEdgeClick={onEdgeClick}
               onPaneClick={() => setSel(null)}
               onNodeDrag={onNodeDrag}
               onNodeDragStop={onNodeDragStop}
@@ -466,7 +492,7 @@ function MapView() {
           <div className="toolbar" style={{ borderBottom: 0, borderTop: '1px solid var(--line)' }}>
             <span className="hint">
               {editable
-                ? 'Клиента в рамку — в группу, он получает её доступы. «+» у клиента или группы тяни к узлу — выдать доступ, к «Интернету» — выбрать выход.'
+                ? 'Клиента в рамку — в группу, он получает её доступы. «+» у клиента или группы тяни к узлу — выдать доступ, к «Интернету» — выбрать выход. Клик по линии к узлу — транзит сетей.'
                 : 'Режим просмотра: менять доступы может оператор или админ.'}
             </span>
           </div>

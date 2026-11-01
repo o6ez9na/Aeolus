@@ -1507,6 +1507,139 @@ button.chip:hover {
   }
 }
 
+/* Transit lines are clickable: they open the network-transit inspector. */
+.react-flow__edge.transit-edge {
+  cursor: pointer;
+}
+
+.react-flow__edge.transit-edge:hover .react-flow__edge-path {
+  stroke-width: 4;
+}
+
+.react-flow__edge.transit-edge.sel .react-flow__edge-path {
+  filter: drop-shadow(0 0 4px var(--transit));
+}
+
+/* A bridge: glow underneath, a gradient core, packets running along it. */
+.bridge-glow {
+  fill: none;
+  stroke-width: 14;
+  stroke-linecap: round;
+  filter: blur(5px);
+  pointer-events: none;
+}
+
+.react-flow__edge-path.bridge-core {
+  stroke-linecap: round;
+}
+
+.bridge-pulse {
+  fill: none;
+  stroke: var(--bridge);
+  stroke-width: 4.5;
+  stroke-linecap: round;
+  stroke-dasharray: 0.1 26;
+  animation: bridge-run 1.4s linear infinite;
+  pointer-events: none;
+  filter: drop-shadow(0 0 3px var(--bridge));
+}
+
+.bridge-pulse.rev {
+  stroke: var(--transit);
+  animation-direction: reverse;
+  animation-delay: -0.7s;
+  filter: drop-shadow(0 0 3px var(--transit));
+}
+
+@keyframes bridge-run {
+  to {
+    stroke-dashoffset: -26.1;
+  }
+}
+
+.react-flow__edge.transit-edge.sel .bridge-glow {
+  stroke-width: 20;
+}
+
+.edge-chip,
+.bridge-chip {
+  position: absolute;
+  pointer-events: all;
+  cursor: pointer;
+  font: 500 11.5px/1 var(--font-sans);
+  padding: 5px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--muted);
+  transition: box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.edge-chip.err {
+  border-color: var(--err);
+  color: var(--err);
+  background: var(--err-soft);
+}
+
+.bridge-chip {
+  border-color: var(--bridge);
+  color: var(--bridge);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px var(--bridge-soft);
+}
+
+.bridge-chip:hover,
+.bridge-chip.sel {
+  box-shadow: 0 0 0 5px var(--bridge-soft), 0 0 14px var(--bridge-soft);
+}
+
+/* The two sides of a bridge, in the inspector. */
+.bridge-plan {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--raised);
+  font-size: 13px;
+}
+
+.bridge-plan .arrow {
+  font-size: 20px;
+  color: var(--dim);
+}
+
+.bridge-plan.on {
+  border-color: var(--bridge);
+  background: var(--bridge-soft);
+}
+
+.bridge-plan.on .arrow {
+  color: var(--bridge);
+}
+
+.bridge-toggle {
+  width: 100%;
+  justify-content: center;
+  min-height: 40px;
+}
+
+.link-btn {
+  all: unset;
+  cursor: pointer;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bridge-pulse {
+    animation: none;
+  }
+}
+
 .mcard {
   border-radius: 12px;
   background: var(--surface);

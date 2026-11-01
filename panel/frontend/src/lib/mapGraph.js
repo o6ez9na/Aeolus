@@ -13,6 +13,7 @@
 import { clientState, clientUsable, nodeState, transportLabel } from './model'
 import { formatSince } from './format'
 import { groupSummary } from './groups'
+import { linkOf } from './links'
 
 export const CLIENT_W = 184
 export const CLIENT_H = 56
@@ -97,10 +98,28 @@ function edgeStyle(stroke, width, opacity) {
  * Which cards and lines the current selection touches. `null` means nothing
  * is singled out and everything is drawn at full strength.
  */
-function focus(sel, prep, clients) {
+function focus(sel, prep, clients, links) {
   if (!sel || sel.type === 'hub') return null
   const edges = new Set()
   const cards = new Set([HUB])
+  if (sel.type === 'transit') {
+    edges.add(`t:${sel.id}`)
+    edges.add(`l:${sel.id}`)
+    cards.add(nid(sel.id))
+    cards.add(lid(sel.id))
+    return { edges, cards }
+  }
+  if (sel.type === 'link') {
+    const link = links.find((l) => l.id === sel.id)
+    if (!link) return null
+    edges.add(`k:${link.id}`)
+    for (const id of [link.node_a_id, link.node_b_id]) {
+      edges.add(`l:${id}`)
+      cards.add(nid(id))
+      cards.add(lid(id))
+    }
+    return { edges, cards }
+  }
   const holder = (client) => (prep.groupOf[client.id] ? gid(prep.groupOf[client.id]) : cid(client.id))
 
   const addClient = (client) => {
@@ -189,11 +208,21 @@ function clientSub(client, state) {
   return { text: client.last_seen_at ? 'не в сети' : 'не подключался', tone: '' }
 }
 
-export function buildGraph({ prep, clients, layout, sel, layers, connectingFrom, dropGroup }) {
+export function buildGraph({
+  prep,
+  clients,
+  layout,
+  sel,
+  layers,
+  connectingFrom,
+  dropGroup,
+  links = [],
+  onOpenEdge,
+}) {
   const saved = layout?.positions ?? {}
   const auto = autoPositions(prep)
   const at = (id) => saved[id] ?? auto[id]
-  const f = focus(sel, prep, clients)
+  const f = focus(sel, prep, clients, links)
   const op = (id) => (f ? (f.cards.has(id) ? 1 : 0.32) : 1)
   const eop = (id) => (f ? (f.edges.has(id) ? 1 : 0.1) : 1)
   const isSel = (type, id) => sel?.type === type && (id === undefined || sel.id === id)
@@ -213,7 +242,7 @@ export function buildGraph({ prep, clients, layout, sel, layers, connectingFrom,
 
   const rfNodes = []
   const rfEdges = []
-  const edge = (id, source, target, style, { cls = '', sourceHandle, targetHandle, animated } = {}) =>
+  const edge = (id, source, target, style, { cls = '', sourceHandle, targetHandle, animated, type, data } = {}) =>
     rfEdges.push({
       id,
       source,
@@ -225,6 +254,8 @@ export function buildGraph({ prep, clients, layout, sel, layers, connectingFrom,
       animated: animated ?? false,
       focusable: false,
       selectable: false,
+      ...(type ? { type } : {}),
+      ...(data ? { data } : {}),
     })
 
   // Groups first: React Flow wants a parent before its children.
@@ -359,10 +390,25 @@ export function buildGraph({ prep, clients, layout, sel, layers, connectingFrom,
     if (layers.transit) {
       const color =
         state === 'up' ? 'var(--transit)' : state === 'down' ? 'var(--err)' : 'var(--line-strong)'
+      // Network transit with the panel: the same tunnel, drawn as a bridge
+      // while it carries the LANs. A bridge over a tunnel that is down keeps
+      // the alarm colours and says so on its chip.
+      const bridged = Boolean(linkOf(links, node, prep.hub))
+      const selected = isSel('transit', node.id)
       edge(`t:${node.id}`, HUB, id, edgeStyle(color, state === 'up' ? 2.5 : 1.75, eop(`t:${node.id}`)), {
-        cls: state === 'up' ? '' : state === 'down' ? 'dashed-wide' : 'dotted',
+        cls: `transit-edge${selected ? ' sel' : ''} ${state === 'up' ? '' : state === 'down' ? 'dashed-wide' : 'dotted'}`,
         sourceHandle: 'out',
         targetHandle: 'in',
+        type: pending ? undefined : 'transit',
+        data: pending
+          ? undefined
+          : {
+              bridged: bridged && state === 'up',
+              selected,
+              chip: bridged && state !== 'up' ? '⇄ транзит сетей · нет туннеля' : selected ? 'транзит' : null,
+              chipTone: bridged && state !== 'up' ? 'err' : '',
+              onOpen: () => onOpenEdge?.({ type: 'transit', id: node.id }),
+            },
       })
     }
 
@@ -395,6 +441,32 @@ export function buildGraph({ prep, clients, layout, sel, layers, connectingFrom,
     }
     void index
   })
+
+  // Network transit between two nodes: through the hub, both ways.
+  if (layers.transit) {
+    const shownIds = new Set(prep.shown.map((n) => n.id))
+    for (const link of links) {
+      if (!shownIds.has(link.node_a_id) || !shownIds.has(link.node_b_id)) continue
+      const a = prep.shown.find((n) => n.id === link.node_a_id)
+      const b = prep.shown.find((n) => n.id === link.node_b_id)
+      const up = nodeState(a) === 'up' && nodeState(b) === 'up'
+      const selected = isSel('link', link.id)
+      edge(`k:${link.id}`, nid(a.id), nid(b.id), edgeStyle('var(--err)', 1.75, eop(`k:${link.id}`)), {
+        cls: `transit-edge${selected ? ' sel' : ''}${up ? '' : ' dashed-wide'}`,
+        sourceHandle: 'out',
+        targetHandle: 'in',
+        type: 'transit',
+        data: {
+          bridged: up,
+          both: true,
+          selected,
+          chip: up ? null : '⇄ транзит сетей · нет туннеля',
+          chipTone: 'err',
+          onOpen: () => onOpenEdge?.({ type: 'link', id: link.id }),
+        },
+      })
+    }
+  }
 
   if (layers.exits && exitsByNode.hub) {
     const live = exitsByNode.hub.some((c) => c.session)

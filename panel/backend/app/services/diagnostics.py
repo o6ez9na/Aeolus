@@ -156,10 +156,10 @@ async def build(session: AsyncSession, node: Node) -> dict:
             _check(
                 "site_lan",
                 "ok" if shared else "unknown",
-                "Сеть панели для связей",
+                "Сеть панели для транзита сетей",
                 (", ".join(shared) + f"; связанных узлов: {len(linked)}")
                 if shared
-                else "не задана: узлы можно связать только между собой",
+                else "не задана: транзит сетей возможен только между узлами",
             )
         )
         plan = _read(config_dir / "routing.json")
@@ -245,7 +245,7 @@ async def build(session: AsyncSession, node: Node) -> dict:
         peer = everyone.get(link.other(node.id))
         if peer is None:
             continue
-        title = "Связь с сетью панели" if peer.is_hub else f"Связь сетей с {peer.name}"
+        title = "Транзит сетей с панелью" if peer.is_hub else f"Транзит сетей с {peer.name}"
         nets = ", ".join(links_service.site_networks(peer)) or "—"
         if _version(node.agent_version) < _LINKS_SINCE:
             checks.append(
@@ -253,7 +253,7 @@ async def build(session: AsyncSession, node: Node) -> dict:
                     f"link:{peer.name}",
                     "fail",
                     title,
-                    f"агент {node.agent_version or '?'} не умеет связи сетей: "
+                    f"агент {node.agent_version or '?'} не умеет транзит сетей: "
                     "нужен anemoi 0.3.0 или новее, переустанови узел",
                 )
             )

@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { useAuth } from '../../auth/AuthContext'
+import { SiteLinks } from '../SiteLinks'
 import { formatAgo } from '../../lib/format'
+import { linkBlocker, linkOf, versionAtLeast } from '../../lib/links'
 import { useMesh } from '../../lib/mesh'
 import {
   NODE_STATE_LABEL,
@@ -296,6 +298,175 @@ export function InternetInspector({ onSelect }) {
       <span className="hint">
         У клиента один выход. Протяни клиента к «Интернету» на карте или смени выход в его карточке.
       </span>
+    </section>
+  )
+}
+
+/**
+ * The line between the panel and a node. The tunnel is always there; what
+ * this switches is network transit over it: the node's LAN reaching the
+ * panel's, with no VPN client on any device.
+ */
+export function TransitInspector({ node, hub, onSelect }) {
+  const { user } = useAuth()
+  const mesh = useMesh()
+  const editable = canEdit(user)
+  const [busy, setBusy] = useState(false)
+  const state = nodeState(node)
+  const link = linkOf(mesh.links, node, hub)
+  const blocker = link ? null : linkBlocker(node, hub)
+  const oldAgent = !versionAtLeast(node.agent_version)
+
+  const toggle = () => {
+    setBusy(true)
+    void (link ? mesh.unlinkNodes(link) : mesh.linkNodes(node, hub))
+      .catch(() => {})
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <section className="stack-lg">
+      <Head
+        dot={dotClass(state)}
+        name={`${hub.name} ⇄ ${node.name}`}
+        sub={
+          link
+            ? state === 'up'
+              ? 'Транзит сетей включён'
+              : 'Транзит сетей включён, но туннеля нет'
+            : state === 'up'
+              ? 'Туннель поднят, сети не связаны'
+              : NODE_STATE_LABEL[state]
+        }
+        subClass={link && state === 'up' ? 'ok-text' : state === 'down' ? 'err-text' : 'muted'}
+      />
+      <div className={`bridge-plan${link ? ' on' : ''}`}>
+        <div>
+          <div className="lbl">{node.name}</div>
+          <div className="mono">{node.subnets.join(', ') || '—'}</div>
+        </div>
+        <span className="arrow" aria-hidden="true">
+          {link ? '⇄' : '→'}
+        </span>
+        <div style={{ textAlign: 'right' }}>
+          <div className="lbl">{hub.name}</div>
+          <div className="mono">{hub.site_networks.join(', ') || 'сеть не задана'}</div>
+        </div>
+      </div>
+      <Meta
+        items={[
+          ['Туннель', transportLabel(node), true],
+          ['Агент', node.agent_version || '—', true],
+        ]}
+      />
+      {editable && (
+        <button
+          type="button"
+          className={`btn ${link ? '' : 'primary'} bridge-toggle`}
+          disabled={busy || Boolean(blocker)}
+          title={blocker || undefined}
+          onClick={toggle}
+        >
+          {busy ? '…' : link ? 'Выключить транзит сетей' : 'Включить транзит сетей'}
+        </button>
+      )}
+      {blocker && (
+        <span className="hint warn-text">
+          {blocker}
+          {!hub.site_networks.length && (
+            <>
+              {' '}
+              <button type="button" className="link-btn" onClick={() => onSelect({ type: 'node', id: hub.id })}>
+                Открыть панель
+              </button>
+            </>
+          )}
+        </span>
+      )}
+      <span className="hint">
+        {link
+          ? `Устройства ${node.subnets.join(', ')} открывают ${hub.site_networks.join(', ')} без VPN-клиента. В сети панели их запросы видны с адреса панели; оттуда в сеть узла соединения не начинаются.`
+          : 'Включишь — узел переподключит транзит и получит маршрут в сеть панели. Клиентам VPN это ничего не меняет.'}
+      </span>
+      {link && oldAgent && (
+        <div className="callout warn">
+          Агент {node.agent_version || '?'} получает маршрут, но не пропускает трафик: переустанови узел
+          командой со страницы узлов, нужен anemoi 0.3.0 или новее.
+        </div>
+      )}
+      <div className="stack" style={{ gap: 8 }}>
+        <span className="lbl">Транзит к другим узлам</span>
+        <SiteLinks node={node} editable={editable} withHub={false} bare />
+      </div>
+      <Link className="btn sm" to={`/nodes/${node.id}`}>
+        Страница узла
+      </Link>
+    </section>
+  )
+}
+
+/** Network transit between two nodes, through the panel, both ways. */
+export function LinkInspector({ link, onSelect }) {
+  const { user } = useAuth()
+  const mesh = useMesh()
+  const editable = canEdit(user)
+  const [busy, setBusy] = useState(false)
+  const a = mesh.nodes.find((n) => n.id === link.node_a_id)
+  const b = mesh.nodes.find((n) => n.id === link.node_b_id)
+  const up = a && b && nodeState(a) === 'up' && nodeState(b) === 'up'
+  const old = [a, b].filter((n) => n && !versionAtLeast(n.agent_version))
+
+  return (
+    <section className="stack-lg">
+      <Head
+        dot={up ? 'dot live' : 'dot err'}
+        name={`${link.node_a_name} ⇄ ${link.node_b_name}`}
+        sub={up ? 'Транзит сетей включён, в обе стороны' : 'Транзит сетей включён, но одного из туннелей нет'}
+        subClass={up ? 'ok-text' : 'err-text'}
+      />
+      <div className="bridge-plan on">
+        <div>
+          <div className="lbl">{link.node_a_name}</div>
+          <div className="mono">{link.networks_a.join(', ') || '—'}</div>
+        </div>
+        <span className="arrow" aria-hidden="true">
+          ⇄
+        </span>
+        <div style={{ textAlign: 'right' }}>
+          <div className="lbl">{link.node_b_name}</div>
+          <div className="mono">{link.networks_b.join(', ') || '—'}</div>
+        </div>
+      </div>
+      {old.length > 0 && (
+        <div className="callout warn">
+          {old.map((n) => `${n.name}: агент ${n.agent_version || '?'}`).join(', ')} — нужен anemoi 0.3.0
+          или новее, иначе трафик не пройдёт.
+        </div>
+      )}
+      {editable && (
+        <button
+          type="button"
+          className="btn bridge-toggle"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true)
+            void mesh
+              .unlinkNodes(link)
+              .then(() => onSelect(null))
+              .catch(() => {})
+              .finally(() => setBusy(false))
+          }}
+        >
+          {busy ? '…' : 'Выключить транзит сетей'}
+        </button>
+      )}
+      <div className="row-wrap" style={{ gap: 8 }}>
+        {[a, b].filter(Boolean).map((n) => (
+          <button key={n.id} type="button" className="btn sm" onClick={() => onSelect({ type: 'node', id: n.id })}>
+            {n.name}
+          </button>
+        ))}
+      </div>
     </section>
   )
 }

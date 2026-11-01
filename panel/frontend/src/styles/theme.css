@@ -36,6 +36,9 @@
   --live: #3fcf9a;
   --live-soft: rgb(63 207 154 / 14%);
   --transit: #6ea8fe;
+  /* Network transit between sites: the transit line turned bridge. */
+  --bridge: #2ee6d6;
+  --bridge-soft: rgb(46 230 214 / 16%);
   --exit: #b197fc;
   --exit-soft: rgb(177 151 252 / 14%);
   --warn: #f2b45a;
@@ -70,6 +73,8 @@
   --live: #0f8a5f;
   --live-soft: rgb(15 138 95 / 10%);
   --transit: #2f6fd6;
+  --bridge: #0b9488;
+  --bridge-soft: rgb(11 148 136 / 12%);
   --exit: #7a4fd8;
   --exit-soft: rgb(122 79 216 / 10%);
   --warn: #9a5b00;

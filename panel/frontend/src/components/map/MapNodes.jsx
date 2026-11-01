@@ -98,7 +98,7 @@ export const HubCard = memo(function HubCard({ data: d }) {
       <Anchor type="target" position={Position.Left} id="in" />
       <span className="t" style={{ fontSize: 15 }}>
         <span className="logo">
-          <Icon name="logo" size={16} stroke={1.9} />
+          <Icon name="logo" size={18} stroke={1.9} />
         </span>
         {name}
       </span>

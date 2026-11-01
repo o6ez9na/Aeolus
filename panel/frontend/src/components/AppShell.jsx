@@ -61,7 +61,7 @@ function Rail({ onSearch }) {
   return (
     <nav className="rail" aria-label="Разделы">
       <NavLink to="/map" className="rail-logo" aria-label="Aeolus — карта">
-        <Icon name="logo" size={22} stroke={1.9} />
+        <Icon name="logo" size={27} stroke={1.9} />
       </NavLink>
       {NAV.map((item) => (
         <NavLink

@@ -134,8 +134,9 @@ h3 {
   width: 40px;
   height: 40px;
   border-radius: 11px;
-  background: var(--accent);
-  color: var(--on-accent);
+  /* The brand mark, as in favicon.svg: the same in both themes. */
+  background: linear-gradient(135deg, #6ea8fe, #2ee6d6);
+  color: #0a1822;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1839,8 +1840,9 @@ button.chip:hover {
   width: 26px;
   height: 26px;
   border-radius: 8px;
-  background: var(--accent);
-  color: var(--on-accent);
+  /* The brand mark, as in favicon.svg: the same in both themes. */
+  background: linear-gradient(135deg, #6ea8fe, #2ee6d6);
+  color: #0a1822;
   display: flex;
   align-items: center;
   justify-content: center;

@@ -38,7 +38,7 @@ export function LoginPage() {
         <div className="panel-head" style={{ alignItems: 'center' }}>
           <span className="brand">
             <span className="rail-logo" style={{ margin: 0 }}>
-              <Icon name="logo" size={22} stroke={1.9} />
+              <Icon name="logo" size={27} stroke={1.9} />
             </span>
             <span style={{ display: 'flex', flexDirection: 'column' }}>
               <b>Aeolus</b>

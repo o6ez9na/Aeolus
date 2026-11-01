@@ -1,10 +1,13 @@
 /** Stroke icons drawn for the panel, on a 20×20 grid. */
 const PATHS = {
+  // The letter A drawn as the mesh: the hub at the apex, transit tunnels down
+  // to two nodes, the network-transit bridge across. Same mark as favicon.svg.
   logo: (
     <>
-      <path d="M3 7.5h8.5a2.7 2.7 0 1 0-2.7-2.7" />
-      <path d="M3 11h11.3a2.7 2.7 0 1 1-2.7 2.7" />
-      <path d="M3 14.5h4.5" />
+      <path d="M9.1 5.68L4.74 15.33M10.9 5.68l4.36 9.65M7.01 12.02h5.98" />
+      <circle cx="10" cy="3.95" r="2.09" fill="currentColor" stroke="none" />
+      <circle cx="4.17" cy="16.62" r="1.55" fill="currentColor" stroke="none" />
+      <circle cx="15.83" cy="16.62" r="1.55" fill="currentColor" stroke="none" />
     </>
   ),
   map: (

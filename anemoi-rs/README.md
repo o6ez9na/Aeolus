@@ -17,9 +17,14 @@ All static, 2.5–3.5 MB, soft-float on MIPS (routers there have no FPU).
 ## Installing a node
 
 ```sh
+[ -x /opt/bin/opkg ] && opkg update && opkg install wget-ssl ca-bundle; \
 wget -qO- https://raw.githubusercontent.com/o6ez9na/Aeolus/main/scripts/install-node.sh \
   | sh -s -- --panel vpn.example.com
 ```
+
+The first line is for Keenetic: Entware's own `wget` is a busybox applet that
+cannot do HTTPS, and the firmware has none. Elsewhere the test is false and
+it does nothing.
 
 The script picks the binary for the machine, checks it against the release's
 `SHA256SUMS` and runs `anemoi install`, which:

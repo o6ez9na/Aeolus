@@ -8,9 +8,13 @@
 #   wget -qO- https://raw.githubusercontent.com/o6ez9na/Aeolus/main/scripts/install-node.sh | sh -s -- --panel vpn.example.com
 #   curl -fsSL .../install-node.sh | sh -s -- --panel vpn.example.com --name home
 #
+# On Keenetic, Entware's wget is a busybox applet without HTTPS, so put
+# wget-ssl in first (the panel's command does it):
+#   opkg update && opkg install wget-ssl ca-bundle
+#
 # Everything after `--` goes to `anemoi install` (see `anemoi help`).
 #
-#   ANEMOI_VERSION=anemoi-v0.2.0   a specific release instead of the latest
+#   ANEMOI_VERSION=anemoi-v0.2.1   a specific release instead of the latest
 #   ANEMOI_RELEASE_URL=...         where the binaries and SHA256SUMS live
 #
 # Plain POSIX sh: it has to run in busybox ash on a router with nothing else.

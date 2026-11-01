@@ -69,6 +69,12 @@ function PendingCard({ node, editable }) {
 
 const RAW = 'https://raw.githubusercontent.com/o6ez9na/Aeolus/main/scripts'
 
+// Entware's own wget is a busybox applet without TLS ("not an http or ftp
+// url"), and Keenetic's firmware has none at all, so on Entware the command
+// first puts in wget-ssl. Elsewhere the test is false and it is a plain wget:
+// OpenWrt's speaks HTTPS, and so does any Linux distribution's.
+const ENTWARE_WGET = '[ -x /opt/bin/opkg ] && opkg update && opkg install wget-ssl ca-bundle;'
+
 // What goes into the copied command is typed by hand; keep it to the
 // characters a name, a host or a list of networks can have, so a stray quote
 // or semicolon never ends up in a root shell.
@@ -115,7 +121,7 @@ function ConnectNode({ hub, onClose }) {
     const args = [`--panel ${host}`, node && `--name ${node}`, nets && `--subnets ${nets}`]
       .filter(Boolean)
       .join(' ')
-    command = `wget -qO- ${RAW}/install-node.sh | sh -s -- ${args}`
+    command = `${ENTWARE_WGET} wget -qO- ${RAW}/install-node.sh | sh -s -- ${args}`
   } else {
     const env = [
       `AEOLUS_PANEL_DOMAIN=${host}`,
@@ -202,9 +208,11 @@ function ConnectNode({ hub, onClose }) {
           </button>
           {kind === 'router' && (
             <span className="hint">
-              Keenetic: сначала Entware и компоненты прошивки «OpenVPN» и «Модули ядра подсистемы
-              Netfilter». Если <code className="mono">wget</code> не умеет HTTPS —{' '}
-              <code className="mono">opkg install wget-ssl</code>.
+              Keenetic: сначала Entware и компонент прошивки «Модули ядра подсистемы Netfilter».
+              Команда сама поставит <code className="mono">wget-ssl</code>: встроенный в Entware{' '}
+              <code className="mono">wget</code> не умеет HTTPS. Если{' '}
+              <code className="mono">anemoi doctor</code> скажет, что транзит не поднят, добавь
+              компонент «OpenVPN» (Giant KN-2610 на 5.1 обошёлся без него).
             </span>
           )}
         </div>

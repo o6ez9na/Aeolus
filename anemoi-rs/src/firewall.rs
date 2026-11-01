@@ -5,6 +5,11 @@
 //! or into its LAN. That takes forwarding between the tunnel and the rest, and
 //! masquerading the pools on the way out.
 //!
+//! The node's own address in its LAN is part of that LAN: a client granted the
+//! LAN reaches the router there too (its web UI, DNS, ping). Only that address —
+//! the transit address, the uplink and anything else on the box stay closed.
+//! The hub already decides which client may reach the LAN at all.
+//!
 //! Sites linked to this one (the `site-subnets`) are networks behind the hub or
 //! behind another node. They are forwarded both ways between the LAN and the
 //! tunnel and never masqueraded: this machine is its LAN's gateway, so the
@@ -30,10 +35,13 @@ pub struct Plan {
     pub pools: Vec<String>,
     /// Networks of the linked sites: forwarded both ways, never masqueraded.
     pub sites: Vec<String>,
+    /// This node's own LANs (ANEMOI_SUBNETS): the pools may reach the node's
+    /// addresses in them.
+    pub lans: Vec<String>,
 }
 
 impl Plan {
-    pub fn read(config_dir: &Path) -> Plan {
+    pub fn read(config_dir: &Path, lans: &[String]) -> Plan {
         let list = |name: &str| -> Vec<String> {
             std::fs::read_to_string(config_dir.join(name))
                 .unwrap_or_default()
@@ -46,9 +54,12 @@ impl Plan {
         Plan {
             pools: list("nat-subnets"),
             sites: list("site-subnets"),
+            lans: lans.to_vec(),
         }
     }
 
+    /// "Nothing from the panel yet". The LANs come from local settings, so
+    /// they alone do not make a plan.
     pub fn is_empty(&self) -> bool {
         self.pools.is_empty() && self.sites.is_empty()
     }
@@ -56,6 +67,18 @@ impl Plan {
     /// Everything reached through the tunnel.
     fn tunnel_networks(&self) -> Vec<String> {
         self.pools.iter().chain(&self.sites).cloned().collect()
+    }
+
+    /// (pool, LAN) pairs: who may reach the node's own LAN address.
+    fn lan_access(&self) -> Vec<(&str, &str)> {
+        self.pools
+            .iter()
+            .flat_map(|pool| {
+                self.lans
+                    .iter()
+                    .map(move |lan| (pool.as_str(), lan.as_str()))
+            })
+            .collect()
     }
 }
 
@@ -112,8 +135,9 @@ impl OpenWrt {
     fn wanted(plan: &Plan, dev: &str) -> Vec<Vec<String>> {
         let s = |parts: &[&str]| parts.iter().map(|p| p.to_string()).collect::<Vec<_>>();
         let mut cmds = vec![
-            // The tunnel is a zone of its own: nothing from it reaches the
-            // router itself, and it only forwards where the rules below say.
+            // The tunnel is a zone of its own: from it the router answers only
+            // on its LAN address (the aeolus_in rules), and it only forwards
+            // where the rules below say.
             s(&["set", "firewall.aeolus=zone"]),
             s(&["set", "firewall.aeolus.name=aeolus"]),
             s(&["set", "firewall.aeolus.input=REJECT"]),
@@ -140,6 +164,20 @@ impl OpenWrt {
             cmds.push(s(&["set", "firewall.aeolus_lan_out=forwarding"]));
             cmds.push(s(&["set", "firewall.aeolus_lan_out.src=lan"]));
             cmds.push(s(&["set", "firewall.aeolus_lan_out.dest=aeolus"]));
+        }
+        // The router's own LAN address, for the pools. Without a dest, a
+        // rule is an input rule; with dest_ip in the LAN it matches only the
+        // router's address there, so the zone's input=REJECT keeps the rest.
+        // One section per pair, single values, like the NAT ones below.
+        for (i, (pool, lan)) in plan.lan_access().into_iter().enumerate() {
+            let section = format!("firewall.aeolus_in{i}");
+            cmds.push(vec!["set".into(), format!("{section}=rule")]);
+            cmds.push(vec!["set".into(), format!("{section}.name=aeolus-in-{i}")]);
+            cmds.push(vec!["set".into(), format!("{section}.src=aeolus")]);
+            cmds.push(vec!["set".into(), format!("{section}.src_ip={pool}")]);
+            cmds.push(vec!["set".into(), format!("{section}.dest_ip={lan}")]);
+            cmds.push(vec!["set".into(), format!("{section}.proto=all")]);
+            cmds.push(vec!["set".into(), format!("{section}.target=ACCEPT")]);
         }
         // One NAT section per subnet: fw4 takes a single src_ip there, and
         // skips the whole section if given a list.
@@ -193,9 +231,12 @@ impl Firewall for OpenWrt {
     fn apply(&mut self, plan: &Plan, dev: &str) -> Result<()> {
         let before = Self::current();
         let mut touched = Self::ours();
-        // NAT sections are rebuilt from the list each time, so a subnet the
-        // panel dropped leaves no stale rule behind.
-        for section in touched.iter().filter(|s| s.starts_with("aeolus_masq")) {
+        // NAT and input sections are rebuilt from the lists each time, so a
+        // subnet the panel dropped leaves no stale rule behind.
+        for section in touched
+            .iter()
+            .filter(|s| s.starts_with("aeolus_masq") || s.starts_with("aeolus_in"))
+        {
             let _ = run("uci", &["-q", "delete", &format!("firewall.{section}")]);
         }
         for cmd in Self::wanted(plan, dev) {
@@ -275,6 +316,34 @@ impl Firewall for OpenWrt {
 pub struct Iptables;
 
 const CHAIN: &str = "AEOLUS-NODE";
+/// Ours in filter INPUT: the pools to the node's own LAN address. A chain of
+/// its own, because the forwarding rules in CHAIN would open the whole box.
+const INPUT_CHAIN: &str = "AEOLUS-NODE-IN";
+
+/// iptables arguments for the INPUT chain. In INPUT a destination in the LAN
+/// can only be one of the node's own addresses there.
+fn input_rules(plan: &Plan, dev: &str) -> Vec<Vec<String>> {
+    plan.lan_access()
+        .into_iter()
+        .map(|(pool, lan)| {
+            [
+                "-A",
+                INPUT_CHAIN,
+                "-i",
+                dev,
+                "-s",
+                pool,
+                "-d",
+                lan,
+                "-j",
+                "ACCEPT",
+            ]
+            .iter()
+            .map(|a| a.to_string())
+            .collect()
+        })
+        .collect()
+}
 
 /// Priority of our "to <network> lookup main" rules, one per network reached
 /// through the tunnel (client pools and linked sites). Below 100, where Keenetic's
@@ -347,26 +416,31 @@ fn ensure_tunnel_rules(networks: &[String]) -> Result<()> {
 }
 
 impl Iptables {
-    fn hook(table: &str, parent: &str) -> Result<()> {
-        let _ = run("iptables", &["-t", table, "-N", CHAIN]);
-        run("iptables", &["-t", table, "-F", CHAIN])?;
-        if !succeeds("iptables", &["-t", table, "-C", parent, "-j", CHAIN]) {
-            run("iptables", &["-t", table, "-I", parent, "1", "-j", CHAIN])?;
+    fn hook(table: &str, parent: &str, chain: &str) -> Result<()> {
+        let _ = run("iptables", &["-t", table, "-N", chain]);
+        run("iptables", &["-t", table, "-F", chain])?;
+        if !succeeds("iptables", &["-t", table, "-C", parent, "-j", chain]) {
+            run("iptables", &["-t", table, "-I", parent, "1", "-j", chain])?;
         }
         Ok(())
     }
 
-    fn unhook(table: &str, parent: &str) {
-        while succeeds("iptables", &["-t", table, "-D", parent, "-j", CHAIN]) {}
-        let _ = run("iptables", &["-t", table, "-F", CHAIN]);
-        let _ = run("iptables", &["-t", table, "-X", CHAIN]);
+    fn unhook(table: &str, parent: &str, chain: &str) {
+        while succeeds("iptables", &["-t", table, "-D", parent, "-j", chain]) {}
+        let _ = run("iptables", &["-t", table, "-F", chain]);
+        let _ = run("iptables", &["-t", table, "-X", chain]);
     }
 }
 
 impl Firewall for Iptables {
     fn apply(&mut self, plan: &Plan, dev: &str) -> Result<()> {
-        Self::hook("filter", "FORWARD")?;
-        Self::hook("nat", "POSTROUTING")?;
+        Self::hook("filter", "FORWARD", CHAIN)?;
+        Self::hook("nat", "POSTROUTING", CHAIN)?;
+        Self::hook("filter", "INPUT", INPUT_CHAIN)?;
+        for rule in input_rules(plan, dev) {
+            let args: Vec<&str> = rule.iter().map(String::as_str).collect();
+            run("iptables", &args)?;
+        }
         for subnet in &plan.pools {
             let s = subnet.as_str();
             run(
@@ -437,8 +511,9 @@ impl Firewall for Iptables {
     }
 
     fn clear(&mut self) -> Result<()> {
-        Self::unhook("filter", "FORWARD");
-        Self::unhook("nat", "POSTROUTING");
+        Self::unhook("filter", "FORWARD", CHAIN);
+        Self::unhook("nat", "POSTROUTING", CHAIN);
+        Self::unhook("filter", "INPUT", INPUT_CHAIN);
         for net in tunnel_rules() {
             let _ = tunnel_rule("del", &net);
         }
@@ -493,6 +568,7 @@ mod tests {
         let plan = Plan {
             pools: vec!["10.20.0.0/24".into(), "10.21.0.0/24".into()],
             sites: vec![],
+            lans: vec![],
         };
         let cmds = OpenWrt::wanted(&plan, "aeolus0");
         for cmd in &cmds {
@@ -528,6 +604,7 @@ mod tests {
         let unlinked = Plan {
             pools: vec!["10.20.0.0/24".into()],
             sites: vec![],
+            lans: vec![],
         };
         let cmds = OpenWrt::wanted(&unlinked, "aeolus0");
         assert!(has(&cmds, "delete", "firewall.aeolus_lan_out"));
@@ -536,6 +613,7 @@ mod tests {
         let linked = Plan {
             pools: vec!["10.20.0.0/24".into()],
             sites: vec!["192.168.1.0/24".into()],
+            lans: vec![],
         };
         let cmds = OpenWrt::wanted(&linked, "aeolus0");
         assert!(has(&cmds, "set", "firewall.aeolus_lan_out=forwarding"));
@@ -550,7 +628,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("nat-subnets"), "10.20.0.0/24\n\n10.21.0.0/24\n").unwrap();
         std::fs::write(dir.join("site-subnets"), " 192.168.1.0/24 \n").unwrap();
-        let plan = Plan::read(&dir);
+        let plan = Plan::read(&dir, &["192.168.3.0/24".to_string()]);
+        assert_eq!(plan.lans, vec!["192.168.3.0/24"]);
         assert_eq!(plan.pools, vec!["10.20.0.0/24", "10.21.0.0/24"]);
         assert_eq!(plan.sites, vec!["192.168.1.0/24"]);
         assert_eq!(
@@ -560,8 +639,60 @@ mod tests {
         assert!(!plan.is_empty());
         // An agent from before links writes no site-subnets: still a valid plan.
         std::fs::remove_file(dir.join("site-subnets")).unwrap();
-        assert!(Plan::read(&dir).sites.is_empty());
+        assert!(Plan::read(&dir, &[]).sites.is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
-        assert!(Plan::read(&dir).is_empty());
+        assert!(Plan::read(&dir, &[]).is_empty());
+        // Local LANs without anything from the panel are still no plan.
+        assert!(Plan::read(&dir, &["192.168.3.0/24".to_string()]).is_empty());
+    }
+
+    fn lan_plan() -> Plan {
+        Plan {
+            pools: vec!["10.20.0.0/24".into(), "10.21.0.0/24".into()],
+            sites: vec!["192.168.1.0/24".into()],
+            lans: vec!["192.168.3.0/24".into()],
+        }
+    }
+
+    #[test]
+    fn iptables_opens_only_the_lan_address_to_the_pools() {
+        let rules = input_rules(&lan_plan(), "aeolus0");
+        let joined: Vec<String> = rules.iter().map(|r| r.join(" ")).collect();
+        assert_eq!(
+            joined,
+            vec![
+                "-A AEOLUS-NODE-IN -i aeolus0 -s 10.20.0.0/24 -d 192.168.3.0/24 -j ACCEPT",
+                "-A AEOLUS-NODE-IN -i aeolus0 -s 10.21.0.0/24 -d 192.168.3.0/24 -j ACCEPT",
+            ]
+        );
+        // Linked sites get no way into the box, and no LAN means no rule.
+        assert!(!joined.iter().any(|r| r.contains("192.168.1.0/24")));
+        let mut no_lan = lan_plan();
+        no_lan.lans.clear();
+        assert!(input_rules(&no_lan, "aeolus0").is_empty());
+    }
+
+    #[test]
+    fn openwrt_input_rules_name_one_pool_and_one_lan() {
+        let cmds = OpenWrt::wanted(&lan_plan(), "aeolus0");
+        let has = |what: &str| cmds.iter().any(|c| c[0] == "set" && c[1] == what);
+        assert!(has("firewall.aeolus_in0=rule"));
+        assert!(has("firewall.aeolus_in0.src=aeolus"));
+        assert!(has("firewall.aeolus_in0.src_ip=10.20.0.0/24"));
+        assert!(has("firewall.aeolus_in0.dest_ip=192.168.3.0/24"));
+        assert!(has("firewall.aeolus_in0.target=ACCEPT"));
+        assert!(has("firewall.aeolus_in1.src_ip=10.21.0.0/24"));
+        // An input rule has no dest zone, and the zone itself stays closed.
+        assert!(
+            !cmds
+                .iter()
+                .any(|c| c[1].starts_with("firewall.aeolus_in0.dest="))
+        );
+        assert!(has("firewall.aeolus.input=REJECT"));
+        assert!(
+            !cmds
+                .iter()
+                .any(|c| c[0] == "add_list" && c[1].starts_with("firewall.aeolus_in"))
+        );
     }
 }

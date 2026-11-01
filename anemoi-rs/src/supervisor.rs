@@ -295,7 +295,7 @@ impl Supervisor {
     }
 
     fn sync_firewall(&mut self) -> Result<()> {
-        let plan = firewall::Plan::read(&self.cfg.config_dir);
+        let plan = firewall::Plan::read(&self.cfg.config_dir, &self.cfg.subnets);
         if self.applied_plan.as_ref() == Some(&plan) {
             return Ok(());
         }

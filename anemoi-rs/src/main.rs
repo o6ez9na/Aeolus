@@ -99,7 +99,7 @@ fn main() {
 /// Put the firewall rules back from what is on disk: for platforms that wipe
 /// them behind our back (Keenetic's netfilter.d hook calls this).
 fn firewall_apply(cfg: &Config) -> i32 {
-    let plan = firewall::Plan::read(&cfg.config_dir);
+    let plan = firewall::Plan::read(&cfg.config_dir, &cfg.subnets);
     if plan.is_empty() {
         return 0;
     }

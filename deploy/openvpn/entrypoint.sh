@@ -135,7 +135,11 @@ PLAN="$CONFIG_DIR/routing.json"
 seen_plan=""
 apply_plan() {
     [ -f "$PLAN" ] || return 0
-    current=$(sha256sum "$PLAN" | cut -d" " -f1)
+    # The plan alone is not enough: when OpenVPN restarts its tun devices are
+    # recreated, the kernel drops every route through them, and the exit tables
+    # are left empty — those clients would then quietly leave through the hub.
+    # Main changing is what tells us that happened.
+    current=$({ sha256sum <"$PLAN"; ip -4 route show table main; } | sha256sum | cut -d" " -f1)
     [ "$current" = "$seen_plan" ] && return 0
     if /usr/local/bin/apply-routing.sh "$PLAN"; then
         seen_plan="$current"

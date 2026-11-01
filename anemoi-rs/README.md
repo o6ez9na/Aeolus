@@ -65,6 +65,10 @@ panel that still publishes its own gRPC port), `--token TOKEN`, `--no-start`.
   wstunnel's protocol, so the panel side is the stock wstunnel server.
 - Lets the hub's client pools out: fw4 via uci on OpenWrt, its own iptables
   chains elsewhere.
+- Forwards between its LAN and linked sites (`site-subnets`: the panel's LAN
+  or another node's), unmasqueraded; the routes to them come pushed by the hub.
+  Traffic to the pools and the sites takes the main table (`ip rule` at 90), so
+  Keenetic's connection policies cannot blackhole it.
 
 Settings are `ANEMOI_*` variables, read from the environment or the env file;
 the same names as the Python agent, so the binary can replace it in a

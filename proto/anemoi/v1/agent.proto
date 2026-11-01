@@ -48,6 +48,10 @@ message ConfigResponse {
   // Networks the node masquerades out its own uplink: the hub's client pools,
   // which reach it through the transit tunnel.
   repeated string nat_subnets = 15;
+  // Networks of the sites this node is linked to. Its LAN may reach them
+  // through the transit tunnel, and they may reach it; the routes to them
+  // come pushed by the hub. Never masqueraded on the node.
+  repeated string site_subnets = 16;
 }
 
 message Session {

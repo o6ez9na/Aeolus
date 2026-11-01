@@ -35,7 +35,7 @@ pub struct Supervisor {
     firewall: Box<dyn Firewall>,
     child: Option<Child>,
     bridge: Option<(u16, JoinHandle<()>)>,
-    applied_nat: Option<Vec<String>>,
+    applied_plan: Option<firewall::Plan>,
     next_start: Instant,
     backoff: Duration,
     /// Set by the log reader when OpenVPN's data channel offload fails.
@@ -126,7 +126,7 @@ impl Supervisor {
             firewall,
             child: None,
             bridge: None,
-            applied_nat: None,
+            applied_plan: None,
             next_start: Instant::now(),
             backoff: Duration::from_secs(2),
             dco_failed: Arc::new(AtomicBool::new(false)),
@@ -295,22 +295,16 @@ impl Supervisor {
     }
 
     fn sync_firewall(&mut self) -> Result<()> {
-        let subnets: Vec<String> = std::fs::read_to_string(self.cfg.config_dir.join("nat-subnets"))
-            .unwrap_or_default()
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .map(String::from)
-            .collect();
-        if self.applied_nat.as_ref() == Some(&subnets) {
+        let plan = firewall::Plan::read(&self.cfg.config_dir);
+        if self.applied_plan.as_ref() == Some(&plan) {
             return Ok(());
         }
-        if subnets.is_empty() {
+        if plan.is_empty() {
             self.firewall.clear()?;
         } else {
-            self.firewall.apply(&subnets, &self.cfg.tun_dev)?;
+            self.firewall.apply(&plan, &self.cfg.tun_dev)?;
         }
-        self.applied_nat = Some(subnets);
+        self.applied_plan = Some(plan);
         Ok(())
     }
 

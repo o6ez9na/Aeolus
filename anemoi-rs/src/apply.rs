@@ -56,6 +56,16 @@ pub fn apply_config(
                 .map(|n| format!("{n}\n"))
                 .collect(),
         ),
+        // Networks of the sites this node is linked to: forwarded both ways
+        // between the LAN and the transit, never masqueraded. Empty: no links.
+        (
+            "site-subnets",
+            response
+                .site_subnets
+                .iter()
+                .map(|n| format!("{n}\n"))
+                .collect(),
+        ),
     ];
     if !response.transit_conf.is_empty() && !response.is_hub {
         // A node dials the hub as an OpenVPN client with the same certificate
@@ -71,7 +81,7 @@ pub fn apply_config(
     for (name, content) in files {
         // Empty means "this node does not run that", not "write an empty
         // file": an empty server.conf would still be started.
-        if content.is_empty() && name != "nat-subnets" {
+        if content.is_empty() && name != "nat-subnets" && name != "site-subnets" {
             continue;
         }
         let mode = if SECRET.contains(&name) { 0o600 } else { 0o644 };
@@ -167,6 +177,7 @@ mod tests {
         assert_eq!(mode(&config.join("tls-crypt.key")), 0o600);
         assert_eq!(mode(&config.join("ca.crt")), 0o644);
         assert_eq!(fs::read_to_string(config.join("nat-subnets")).unwrap(), "");
+        assert_eq!(fs::read_to_string(config.join("site-subnets")).unwrap(), "");
         assert_eq!(fs::read_to_string(config.join(".revision")).unwrap(), "r1");
         assert!(config.join("ccd-transit/home").exists());
 
@@ -211,6 +222,7 @@ mod tests {
             crl_pem: "CRL".into(),
             transit_conf: "client\nremote hub 1195\n".into(),
             nat_subnets: vec!["10.20.0.0/24".into(), "10.21.0.0/24".into()],
+            site_subnets: vec!["192.168.1.0/24".into()],
             is_hub: false,
             ..Default::default()
         };
@@ -225,6 +237,19 @@ mod tests {
             fs::read_to_string(config.join("nat-subnets")).unwrap(),
             "10.20.0.0/24\n10.21.0.0/24\n"
         );
+        assert_eq!(
+            fs::read_to_string(config.join("site-subnets")).unwrap(),
+            "192.168.1.0/24\n"
+        );
+
+        // The link removed: the file empties rather than going stale.
+        let unlinked = ConfigResponse {
+            revision: "n2".into(),
+            site_subnets: vec![],
+            ..response
+        };
+        apply_config(&config, &state, &unlinked).unwrap();
+        assert_eq!(fs::read_to_string(config.join("site-subnets")).unwrap(), "");
     }
 
     #[test]

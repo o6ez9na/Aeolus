@@ -99,17 +99,11 @@ fn main() {
 /// Put the firewall rules back from what is on disk: for platforms that wipe
 /// them behind our back (Keenetic's netfilter.d hook calls this).
 fn firewall_apply(cfg: &Config) -> i32 {
-    let subnets: Vec<String> = std::fs::read_to_string(cfg.config_dir.join("nat-subnets"))
-        .unwrap_or_default()
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .map(String::from)
-        .collect();
-    if subnets.is_empty() {
+    let plan = firewall::Plan::read(&cfg.config_dir);
+    if plan.is_empty() {
         return 0;
     }
-    match firewall::detect().apply(&subnets, &cfg.tun_dev) {
+    match firewall::detect().apply(&plan, &cfg.tun_dev) {
         Ok(()) => 0,
         Err(err) => {
             eprintln!("firewall: {err}");

@@ -220,6 +220,74 @@ pub struct Iptables;
 
 const CHAIN: &str = "AEOLUS-NODE";
 
+/// Priority of our "to <pool> lookup main" rules. Below 100, where Keenetic's
+/// connection policies start: NDMS marks a LAN host that sits in a policy
+/// other than the default one by MAC, routes its traffic through that
+/// policy's table and blackholes whatever the table has no route for. The
+/// table knows nothing of the tunnel, so a granted client's packets reach
+/// such a host and its replies vanish. xkeen uses 99 for its own mark, and
+/// the pools never carry it (private destinations are not proxied).
+const RULE_PREF: &str = "90";
+
+/// The pools our rules currently cover, from `ip -4 rule show` output.
+fn parse_pool_rules(shown: &str) -> Vec<String> {
+    let mut pools: Vec<String> = shown
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix(&format!("{RULE_PREF}:")))
+        .filter(|rest| {
+            rest.split_whitespace()
+                .collect::<Vec<_>>()
+                .ends_with(&["lookup", "main"])
+        })
+        .filter_map(|rest| {
+            let mut words = rest.split_whitespace();
+            words.find(|w| *w == "to")?;
+            words.next().map(normalise_cidr)
+        })
+        .collect();
+    pools.sort();
+    pools.dedup();
+    pools
+}
+
+/// `ip rule` prints a host route without its "/32".
+fn normalise_cidr(cidr: &str) -> String {
+    if cidr.contains('/') {
+        cidr.to_string()
+    } else {
+        format!("{cidr}/32")
+    }
+}
+
+fn pool_rules() -> Vec<String> {
+    parse_pool_rules(&run("ip", &["-4", "rule", "show"]).unwrap_or_default())
+}
+
+fn pool_rule(op: &str, pool: &str) -> Result<()> {
+    run(
+        "ip",
+        &[
+            "-4", "rule", op, "to", pool, "lookup", "main", "pref", RULE_PREF,
+        ],
+    )
+    .map(|_| ())
+}
+
+/// Replies to the pools take the main table, where the tunnel's routes are,
+/// whatever policy routing the box does for its LAN hosts.
+fn ensure_pool_rules(subnets: &[String]) -> Result<()> {
+    let wanted: Vec<String> = subnets.iter().map(|s| normalise_cidr(s)).collect();
+    let present = pool_rules();
+    for pool in present.iter().filter(|p| !wanted.contains(p)) {
+        pool_rule("del", pool)?;
+    }
+    for pool in wanted.iter().filter(|p| !present.contains(p)) {
+        pool_rule("add", pool)?;
+        info!("routing: replies to {pool} take the main table (rule pref {RULE_PREF})");
+    }
+    Ok(())
+}
+
 impl Iptables {
     fn hook(table: &str, parent: &str) -> Result<()> {
         let _ = run("iptables", &["-t", table, "-N", CHAIN]);
@@ -282,12 +350,15 @@ impl Firewall for Iptables {
                 ],
             )?;
         }
-        Ok(())
+        ensure_pool_rules(subnets)
     }
 
     fn clear(&mut self) -> Result<()> {
         Self::unhook("filter", "FORWARD");
         Self::unhook("nat", "POSTROUTING");
+        for pool in pool_rules() {
+            let _ = pool_rule("del", &pool);
+        }
         Ok(())
     }
 
@@ -314,6 +385,25 @@ pub fn ensure_forwarding() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pool_rules_are_read_back_from_ip_rule_show() {
+        // Keenetic 5.1 with xkeen and a connection policy, after our rules.
+        let shown = "0:\tfrom all lookup local \n\
+                     90:\tfrom all to 10.20.0.0/24 lookup main \n\
+                     90:\tfrom all to 10.21.0.0/24 lookup main \n\
+                     90:\tfrom all to 10.30.0.5 lookup main \n\
+                     90:\tfrom 10.9.0.0/24 lookup 7 \n\
+                     99:\tfrom all fwmark 0x111 lookup 111 \n\
+                     100:\tfrom all fwmark 0xffffaaa lookup 4096 \n\
+                     190:\tfrom all to 10.40.0.0/24 lookup main \n\
+                     32766:\tfrom all lookup main \n";
+        assert_eq!(
+            parse_pool_rules(shown),
+            vec!["10.20.0.0/24", "10.21.0.0/24", "10.30.0.5/32"]
+        );
+        assert!(parse_pool_rules("").is_empty());
+    }
 
     #[test]
     fn openwrt_rules_name_only_our_sections() {

@@ -9,7 +9,7 @@
  * hashed files under /assets/ are served from the cache, since their names
  * change with their content.
  */
-const CACHE = 'aeolus-shell-v1'
+const CACHE = 'aeolus-shell-v2'
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

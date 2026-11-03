@@ -270,30 +270,47 @@ function ClientDns({ node, editable }) {
   )
 }
 
+const CIPHER_SCOPES = {
+  client_cipher: {
+    title: 'Шифрование клиентов',
+    saved: (label) => `Шифрование клиентов: ${label}. Профили нужно импортировать заново`,
+    // Phones run OpenVPN Connect: AES and ChaCha, no GOST.
+    confirm: (gost) => (gost ? 'Телефоны не подключатся. Точно?' : 'Старые профили отключатся. Точно?'),
+  },
+  transit_cipher: {
+    title: 'Шифрование между узлами',
+    saved: (label) => `Шифрование между узлами: ${label}. Узлы переподключатся сами`,
+    confirm: (gost, lacking) =>
+      gost && lacking ? 'Узлы без ГОСТ отключатся. Точно?' : 'Узлы переподключатся. Точно?',
+  },
+}
+
 /**
- * The one cipher the whole panel runs on: the hub's listeners, the transit and
- * every profile. The server offers nothing else, so profiles issued before a
- * change stop connecting until they are imported again.
+ * One of the two ciphers the panel runs on, both kept on the hub: for clients
+ * (the hub's listeners and every profile) and between nodes (the transit).
+ * Each listener offers only its own, so profiles issued before a change stop
+ * connecting until they are imported again; nodes get their config by
+ * themselves.
  */
-function DataCipher({ node, editable }) {
+function CipherChoice({ node, editable, field }) {
   const mesh = useMesh()
-  const [draft, setDraft] = useState(node.data_cipher)
+  const scope = CIPHER_SCOPES[field]
+  const [draft, setDraft] = useState(node[field])
   const [busy, setBusy] = useState(false)
-  const chosen = node.data_cipher_options.find((option) => option.key === draft)
+  const chosen = node.cipher_options.find((option) => option.key === draft)
   // Nodes that would lose the transit on GOST: their agent reports no provider.
-  const withoutGost = (mesh.nodes ?? []).filter(
-    (n) => !n.is_hub && n.approval === 'approved' && n.is_enabled && !n.gost_capable,
-  )
+  const withoutGost =
+    field === 'transit_cipher'
+      ? (mesh.nodes ?? []).filter(
+          (n) => !n.is_hub && n.approval === 'approved' && n.is_enabled && !n.gost_capable,
+        )
+      : []
 
   const save = async () => {
     setBusy(true)
     try {
-      const updated = await mesh.updateNode(
-        node,
-        { data_cipher: draft },
-        `Шифрование: ${chosen?.label ?? draft}. OpenVPN перезапустится, профили клиентов нужно импортировать заново`,
-      )
-      setDraft(updated.data_cipher)
+      const updated = await mesh.updateNode(node, { [field]: draft }, scope.saved(chosen?.label ?? draft))
+      setDraft(updated[field])
     } catch {
       // reported by the mesh
     } finally {
@@ -302,10 +319,10 @@ function DataCipher({ node, editable }) {
   }
 
   return (
-    <section className="panel panel-pad stack" aria-label="Шифрование">
-      <h2 style={{ fontSize: 15 }}>Шифрование</h2>
-      <div className="seg-group" style={{ flexDirection: 'column' }} role="radiogroup" aria-label="Алгоритм шифрования">
-        {node.data_cipher_options.map((option) => (
+    <section className="panel panel-pad stack" aria-label={scope.title}>
+      <h2 style={{ fontSize: 15 }}>{scope.title}</h2>
+      <div className="seg-group" style={{ flexDirection: 'column' }} role="radiogroup" aria-label={scope.title}>
+        {node.cipher_options.map((option) => (
           <button
             key={option.key}
             type="button"
@@ -331,20 +348,16 @@ function DataCipher({ node, editable }) {
           ))}
         </div>
       )}
-      {editable && draft !== node.data_cipher && (
+      {editable && draft !== node[field] && (
         <div className="row-wrap">
           <ConfirmButton
             className="btn sm primary"
             label="Сохранить"
-            armedLabel={
-              chosen?.gost
-                ? 'Телефоны и узлы без ГОСТ отключатся. Точно?'
-                : 'Старые профили отключатся. Точно?'
-            }
+            armedLabel={scope.confirm(chosen?.gost, withoutGost.length > 0)}
             disabled={busy}
             onConfirm={() => void save()}
           />
-          <button className="btn sm" type="button" disabled={busy} onClick={() => setDraft(node.data_cipher)}>
+          <button className="btn sm" type="button" disabled={busy} onClick={() => setDraft(node[field])}>
             Отмена
           </button>
         </div>
@@ -693,7 +706,9 @@ export function NodePage() {
 
           {node.is_hub && <ClientDns node={node} editable={editable} />}
 
-          {node.is_hub && <DataCipher node={node} editable={editable} />}
+          {node.is_hub && <CipherChoice node={node} editable={editable} field="client_cipher" />}
+
+          {node.is_hub && <CipherChoice node={node} editable={editable} field="transit_cipher" />}
 
           {node.is_hub && <HubLan node={node} editable={editable} />}
 

@@ -37,10 +37,12 @@ class DataCipher:
     gost: bool
 
 
-# The whole panel runs on one of these, picked on the hub's page: the hub's
-# listeners, the transit and every client profile. The server offers nothing
-# else, so a profile written for another cipher stops connecting — which is
-# what "one algorithm everywhere" means.
+# Picked on the hub's page, twice: one for clients (the hub's listeners and
+# every profile) and one between nodes (the transit). Two because the ends
+# differ: nodes are routers the panel installs GOST on, while phones run
+# OpenVPN Connect, which has AES and ChaCha and nothing else. Each listener
+# offers only its own cipher, so a profile written for another one stops
+# connecting; nodes get their new config on their own.
 #
 # Kuznyechik (GOST R 34.12-2015) is used in CBC mode (GOST R 34.13-2015) with
 # HMAC on Streebog-256 (GOST R 34.11-2012): OpenVPN's data channel takes AEAD
@@ -72,10 +74,18 @@ DATA_CIPHERS: dict[str, DataCipher] = {
 DEFAULT_DATA_CIPHER = "AES-256-GCM"
 
 
-def data_cipher(hub: Node | None) -> DataCipher:
-    """The cipher the panel runs on: the hub's choice, or the default."""
-    key = hub.data_cipher if hub is not None else None
+def _cipher(key: str | None) -> DataCipher:
     return DATA_CIPHERS.get(key or DEFAULT_DATA_CIPHER, DATA_CIPHERS[DEFAULT_DATA_CIPHER])
+
+
+def client_cipher(hub: Node | None) -> DataCipher:
+    """What clients run on: the hub's listeners and every profile."""
+    return _cipher(hub.client_cipher if hub is not None else None)
+
+
+def transit_cipher(hub: Node | None) -> DataCipher:
+    """What the transit between the hub and the nodes runs on."""
+    return _cipher(hub.transit_cipher if hub is not None else None)
 
 
 def _cipher_lines(cipher: DataCipher) -> str:
@@ -161,7 +171,7 @@ client-config-dir ccd{suffix}
 # in as a VPN client. Only names the panel wrote a file for may connect.
 ccd-exclusive
 
-{_cipher_lines(data_cipher(node))}
+{_cipher_lines(client_cipher(node))}
 tls-version-min 1.2
 remote-cert-tls client
 
@@ -245,7 +255,7 @@ ecdh-curve prime256v1
 tls-crypt tls-crypt.key
 crl-verify crl.pem
 
-{_cipher_lines(data_cipher(hub))}
+{_cipher_lines(transit_cipher(hub))}
 tls-version-min 1.2
 remote-cert-tls client
 
@@ -294,7 +304,7 @@ cert transit.crt
 key transit.key
 tls-crypt tls-crypt.key
 
-{_cipher_lines(data_cipher(hub))}
+{_cipher_lines(transit_cipher(hub))}
 tls-version-min 1.2
 
 tun-mtu {settings.vpn_tun_mtu}
@@ -322,7 +332,7 @@ cert transit.crt
 key transit.key
 tls-crypt tls-crypt.key
 
-{_cipher_lines(data_cipher(hub))}
+{_cipher_lines(transit_cipher(hub))}
 tls-version-min 1.2
 
 tun-mtu {settings.vpn_tun_mtu}
@@ -401,7 +411,7 @@ nobind
 persist-key
 persist-tun
 remote-cert-tls server
-{_cipher_lines(data_cipher(node))}
+{_cipher_lines(client_cipher(node))}
 tls-version-min 1.2
 verb 3
 

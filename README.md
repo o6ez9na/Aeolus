@@ -165,11 +165,18 @@ npm run dev   # proxies /api to http://localhost:8000
 
 ## Encryption
 
-The whole panel runs on one data-channel cipher, picked on the hub's page:
-AES-256-GCM (the default), ChaCha20-Poly1305 or GOST Kuznyechik. It applies to
-the hub's client listeners, the transit to every node and every client
-profile. The server offers nothing else, so profiles issued before a change
-stop connecting until they are imported again.
+The hub's page picks two data-channel ciphers, each AES-256-GCM (the default),
+ChaCha20-Poly1305 or GOST Kuznyechik:
+
+- **for clients**: the hub's listeners and every client profile;
+- **between nodes**: the transit from the hub to every node.
+
+Two, because the ends differ. Nodes are routers the agent installs GOST on;
+phones run OpenVPN Connect, which has no GOST at all. So the transit can run
+on Kuznyechik while phones stay on AES. Each listener offers only its own
+cipher: profiles issued before a change of the client cipher stop connecting
+until they are imported again, while nodes pick up a new transit cipher by
+themselves.
 
 Kuznyechik (GOST R 34.12-2015) runs in CBC mode (GOST R 34.13-2015) with HMAC
 on Streebog-256 (GOST R 34.11-2012). The algorithms come from the gost-engine
@@ -181,8 +188,8 @@ Limits:
 
 - The TLS control channel (ECDSA P-256 certificates) and `tls-crypt` stay
   non-GOST.
-- OpenVPN Connect and OpenVPN for Android have no GOST: phones cannot connect
-  while Kuznyechik is selected.
+- OpenVPN Connect and OpenVPN for Android have no GOST: with Kuznyechik as
+  the client cipher, phones cannot connect.
 - A node needs the provider too, and `anemoi install` puts it in place where
   it can: on Keenetic's Entware from the module built into the agent (see
   `anemoi-rs/gost/`), on Debian 12 and Ubuntu 24.04 from

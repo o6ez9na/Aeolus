@@ -115,8 +115,9 @@ def _read(node: Node, connected: set[str]) -> NodeRead:
     if node.is_hub:
         data.client_dns_default = [settings.vpn_dns]
         data.gost_capable = True
-        data.data_cipher = openvpn.data_cipher(node).key
-        data.data_cipher_options = [
+        data.client_cipher = openvpn.client_cipher(node).key
+        data.transit_cipher = openvpn.transit_cipher(node).key
+        data.cipher_options = [
             DataCipherOption(key=c.key, label=c.label, gost=c.gost)
             for c in openvpn.DATA_CIPHERS.values()
         ]
@@ -151,9 +152,9 @@ async def update_node(
     if "client_dns" in changes and not node.is_hub:
         # Only the hub runs the client listener, so nothing would push them.
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "DNS for clients is set on the hub")
-    if "data_cipher" in changes and not node.is_hub:
-        # One cipher for the whole panel, kept with the hub's other settings.
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "the cipher is set on the hub")
+    if {"client_cipher", "transit_cipher"} & changes.keys() and not node.is_hub:
+        # Ciphers are panel-wide, kept with the hub's other settings.
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "ciphers are set on the hub")
     if "site_subnets" in changes and not node.is_hub:
         # A node shares what it announces: the hub routes back to it by those
         # iroutes, and a network it does not announce would have no way back.

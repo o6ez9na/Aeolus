@@ -130,9 +130,11 @@ class Node(Base, UUIDMixin, TimestampMixin):
     # the panel-wide default. Only the hub faces clients, so on any other node
     # the column stays empty.
     client_dns: Mapped[list[str] | None] = mapped_column(JSON)
-    # Hub only: the data-channel cipher the whole panel runs on, a key of
-    # services.openvpn.DATA_CIPHERS. NULL means the default.
-    data_cipher: Mapped[str | None] = mapped_column(String(32))
+    # Hub only: the data-channel ciphers, keys of services.openvpn.DATA_CIPHERS.
+    # One for clients (the hub's listeners and profiles), one for the transit
+    # between nodes. NULL means the default.
+    client_cipher: Mapped[str | None] = mapped_column(String(32))
+    transit_cipher: Mapped[str | None] = mapped_column(String(32))
     # What the agent last reported: OpenSSL there loads the GOST provider, so the
     # node can stay on a panel that runs on Kuznyechik. NULL until it reports.
     gost_capable: Mapped[bool | None] = mapped_column(Boolean)

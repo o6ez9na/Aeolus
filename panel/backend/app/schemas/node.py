@@ -40,10 +40,12 @@ class NodeUpdate(BaseModel):
     client_dns: list[str] | None = Field(default=None, max_length=4)
     # Hub only: its LAN, offered to the sites linked to it. [] or null clears it.
     site_subnets: list[str] | None = Field(default=None, max_length=16)
-    # Hub only: the cipher the whole panel runs on. null goes back to the default.
-    data_cipher: str | None = Field(default=None, max_length=32)
+    # Hub only: the cipher for clients and the one between nodes. null goes back
+    # to the default.
+    client_cipher: str | None = Field(default=None, max_length=32)
+    transit_cipher: str | None = Field(default=None, max_length=32)
 
-    @field_validator("data_cipher")
+    @field_validator("client_cipher", "transit_cipher")
     @classmethod
     def _cipher_is_known(cls, value: str | None) -> str | None:
         # Imported here: services import the schemas, not the other way round.
@@ -136,10 +138,11 @@ class NodeRead(NodeBase):
     client_dns_default: list[str] = []
     # Set on the hub only (its LAN, for site links).
     site_subnets: list[str] = []
-    # Hub only: the cipher in force (the default when none was picked) and what
+    # Hub only: the ciphers in force (the default when none was picked) and what
     # can be picked.
-    data_cipher: str = ""
-    data_cipher_options: list[DataCipherOption] = []
+    client_cipher: str = ""
+    transit_cipher: str = ""
+    cipher_options: list[DataCipherOption] = []
     # The node can load the GOST provider; null until its agent reports. The hub
     # always can: its OpenVPN image ships the provider.
     gost_capable: bool | None = None
@@ -147,7 +150,7 @@ class NodeRead(NodeBase):
     # announced subnets anywhere else.
     site_networks: list[str] = []
 
-    @field_validator("data_cipher", mode="before")
+    @field_validator("client_cipher", "transit_cipher", mode="before")
     @classmethod
     def _null_cipher_is_empty(cls, value: str | None) -> str:
         return value or ""

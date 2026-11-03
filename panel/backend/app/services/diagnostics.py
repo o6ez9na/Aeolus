@@ -294,7 +294,7 @@ async def build(session: AsyncSession, node: Node) -> dict:
         files.append(
             {
                 "name": "transit.conf (узел)",
-                "content": openvpn.render_transit_client_config(node, hub.address),
+                "content": openvpn.render_transit_client_config(node, hub),
             }
         )
 

@@ -7,6 +7,7 @@ panel cannot rebuild from the database.
 import ipaddress
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy import select
@@ -22,6 +23,69 @@ logger = logging.getLogger("aeolus.openvpn")
 
 class OpenVpnError(Exception):
     """Configuration could not be produced. Safe to show to an operator."""
+
+
+@dataclass(frozen=True)
+class DataCipher:
+    """One way to encrypt the data channel, as the panel offers it."""
+
+    key: str  # stored on the hub and sent over the API
+    openvpn: str  # the name OpenVPN and OpenSSL know it by
+    auth: str  # HMAC digest; only CBC uses it, AEAD ciphers carry their own tag
+    providers: str | None  # OpenSSL providers to load, None for the built-in ones
+    label: str
+    gost: bool
+
+
+# The whole panel runs on one of these, picked on the hub's page: the hub's
+# listeners, the transit and every client profile. The server offers nothing
+# else, so a profile written for another cipher stops connecting — which is
+# what "one algorithm everywhere" means.
+#
+# Kuznyechik (GOST R 34.12-2015) is used in CBC mode (GOST R 34.13-2015) with
+# HMAC on Streebog-256 (GOST R 34.11-2012): OpenVPN's data channel takes AEAD
+# only as GCM or ChaCha20-Poly1305, so the GOST MGM mode is not an option. The
+# algorithms come from the gost-engine provider; naming `default` next to it is
+# required, or OpenSSL would load the GOST provider alone.
+DATA_CIPHERS: dict[str, DataCipher] = {
+    c.key: c
+    for c in (
+        DataCipher("AES-256-GCM", "AES-256-GCM", "SHA256", None, "AES-256-GCM", False),
+        DataCipher(
+            "CHACHA20-POLY1305",
+            "CHACHA20-POLY1305",
+            "SHA256",
+            None,
+            "ChaCha20-Poly1305",
+            False,
+        ),
+        DataCipher(
+            "KUZNYECHIK-CBC",
+            "kuznyechik-cbc",
+            "md_gost12_256",
+            "default gostprov",
+            "ГОСТ «Кузнечик» + Стрибог-256",
+            True,
+        ),
+    )
+}
+DEFAULT_DATA_CIPHER = "AES-256-GCM"
+
+
+def data_cipher(hub: Node | None) -> DataCipher:
+    """The cipher the panel runs on: the hub's choice, or the default."""
+    key = hub.data_cipher if hub is not None else None
+    return DATA_CIPHERS.get(key or DEFAULT_DATA_CIPHER, DATA_CIPHERS[DEFAULT_DATA_CIPHER])
+
+
+def _cipher_lines(cipher: DataCipher) -> str:
+    lines = [f"providers {cipher.providers}"] if cipher.providers else []
+    lines += [
+        f"data-ciphers {cipher.openvpn}",
+        f"data-ciphers-fallback {cipher.openvpn}",
+        f"auth {cipher.auth}",
+    ]
+    return "\n".join(lines)
 
 
 def tunnel_subnet(proto: str) -> str:
@@ -97,9 +161,7 @@ client-config-dir ccd{suffix}
 # in as a VPN client. Only names the panel wrote a file for may connect.
 ccd-exclusive
 
-data-ciphers AES-256-GCM
-data-ciphers-fallback AES-256-GCM
-auth SHA256
+{_cipher_lines(data_cipher(node))}
 tls-version-min 1.2
 remote-cert-tls client
 
@@ -136,7 +198,7 @@ def transit_address(host: int) -> str:
     return str(network.network_address + host)
 
 
-def render_transit_server_config(nodes: list[Node]) -> str:
+def render_transit_server_config(nodes: list[Node], hub: Node) -> str:
     """The listener every node dials into, run on the hub.
 
     Nodes are OpenVPN clients here, which is what keeps a node free of inbound
@@ -183,9 +245,7 @@ ecdh-curve prime256v1
 tls-crypt tls-crypt.key
 crl-verify crl.pem
 
-data-ciphers AES-256-GCM
-data-ciphers-fallback AES-256-GCM
-auth SHA256
+{_cipher_lines(data_cipher(hub))}
 tls-version-min 1.2
 remote-cert-tls client
 
@@ -209,7 +269,7 @@ verb 3
 """
 
 
-def render_transit_client_config(node: Node, hub_address: str) -> str:
+def render_transit_client_config(node: Node, hub: Node) -> str:
     """What a node runs to reach the hub. The node is a client here.
 
     Nothing in it depends on the node's routes: those live in its ccd entry on
@@ -234,9 +294,7 @@ cert transit.crt
 key transit.key
 tls-crypt tls-crypt.key
 
-data-ciphers AES-256-GCM
-data-ciphers-fallback AES-256-GCM
-auth SHA256
+{_cipher_lines(data_cipher(hub))}
 tls-version-min 1.2
 
 tun-mtu {settings.vpn_tun_mtu}
@@ -252,7 +310,7 @@ verb 3
 client
 dev tun
 proto {"tcp-client" if transit_proto == "tcp" else "udp"}
-remote {hub_address} {settings.vpn_transit_port} {transit_proto}
+remote {hub.address} {settings.vpn_transit_port} {transit_proto}
 resolv-retry infinite
 nobind
 persist-key
@@ -264,9 +322,7 @@ cert transit.crt
 key transit.key
 tls-crypt tls-crypt.key
 
-data-ciphers AES-256-GCM
-data-ciphers-fallback AES-256-GCM
-auth SHA256
+{_cipher_lines(data_cipher(hub))}
 tls-version-min 1.2
 
 tun-mtu {settings.vpn_tun_mtu}
@@ -345,9 +401,7 @@ nobind
 persist-key
 persist-tun
 remote-cert-tls server
-data-ciphers AES-256-GCM
-data-ciphers-fallback AES-256-GCM
-auth SHA256
+{_cipher_lines(data_cipher(node))}
 tls-version-min 1.2
 verb 3
 

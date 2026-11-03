@@ -64,15 +64,15 @@ all: everything it does is outbound.
 
 Set `AEOLUS_LANG=ru` (or `en`) to skip the language question.
 
-### If the build fails with "no such package"
+### If the build fails with "Unable to locate package"
 
 That is not a missing package on the host — it is the *build container* failing
-to fetch the Alpine index, so apk ends up with no index and reports every
-package as missing:
+to fetch the Ubuntu package index, so apt ends up with no index and reports
+every package as missing:
 
 ```
-WARNING: fetching https://dl-cdn.alpinelinux.org/alpine/v3.22/main: temporary error
-ERROR: unable to select packages: openvpn (no such package)
+W: Failed to fetch http://archive.ubuntu.com/ubuntu/dists/noble/InRelease  Temporary failure resolving 'archive.ubuntu.com'
+E: Unable to locate package openvpn
 ```
 
 Almost always docker has no usable DNS: the provider's resolver mangles the
@@ -162,6 +162,39 @@ npm run dev   # proxies /api to http://localhost:8000
   session for that user.
 - Roles: `viewer` < `operator` < `admin`, enforced by `require_role` dependencies.
 - Passwords: Argon2id, rehashed on login when the parameters change.
+
+## Encryption
+
+The whole panel runs on one data-channel cipher, picked on the hub's page:
+AES-256-GCM (the default), ChaCha20-Poly1305 or GOST Kuznyechik. It applies to
+the hub's client listeners, the transit to every node and every client
+profile. The server offers nothing else, so profiles issued before a change
+stop connecting until they are imported again.
+
+Kuznyechik (GOST R 34.12-2015) runs in CBC mode (GOST R 34.13-2015) with HMAC
+on Streebog-256 (GOST R 34.11-2012). The algorithms come from the gost-engine
+provider for OpenSSL 3, `libengine-gost-openssl`, which is why the OpenVPN
+image is Ubuntu. OpenVPN's data channel takes AEAD only as GCM or
+ChaCha20-Poly1305, so the GOST MGM mode is not available.
+
+Limits:
+
+- The TLS control channel (ECDSA P-256 certificates) and `tls-crypt` stay
+  non-GOST.
+- OpenVPN Connect and OpenVPN for Android have no GOST: phones cannot connect
+  while Kuznyechik is selected.
+- A node needs the provider too, and `anemoi install` puts it in place where
+  it can: on Keenetic's Entware from the module built into the agent (see
+  `anemoi-rs/gost/`), on Debian 12 and Ubuntu 24.04 from
+  `libengine-gost-openssl`. Debian 13 and Alpine do not package it; OpenWrt
+  25.12 ships only the old engine (`libopenssl-gost_engine`), which these
+  configs do not use. The panel lists the nodes whose agent reports no GOST.
+- This implements the GOST algorithms; it is not a certified cryptographic
+  product (СКЗИ).
+
+Measured on x86-64, OpenVPN 2.6.19, iperf3 through the tunnel: AES-256-GCM
+about 1300 Mbit/s, ChaCha20-Poly1305 about 1160, Kuznyechik-CBC with Streebog
+about 290.
 
 ## Status
 

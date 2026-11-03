@@ -270,6 +270,89 @@ function ClientDns({ node, editable }) {
   )
 }
 
+/**
+ * The one cipher the whole panel runs on: the hub's listeners, the transit and
+ * every profile. The server offers nothing else, so profiles issued before a
+ * change stop connecting until they are imported again.
+ */
+function DataCipher({ node, editable }) {
+  const mesh = useMesh()
+  const [draft, setDraft] = useState(node.data_cipher)
+  const [busy, setBusy] = useState(false)
+  const chosen = node.data_cipher_options.find((option) => option.key === draft)
+  // Nodes that would lose the transit on GOST: their agent reports no provider.
+  const withoutGost = (mesh.nodes ?? []).filter(
+    (n) => !n.is_hub && n.approval === 'approved' && n.is_enabled && !n.gost_capable,
+  )
+
+  const save = async () => {
+    setBusy(true)
+    try {
+      const updated = await mesh.updateNode(
+        node,
+        { data_cipher: draft },
+        `Шифрование: ${chosen?.label ?? draft}. OpenVPN перезапустится, профили клиентов нужно импортировать заново`,
+      )
+      setDraft(updated.data_cipher)
+    } catch {
+      // reported by the mesh
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="panel panel-pad stack" aria-label="Шифрование">
+      <h2 style={{ fontSize: 15 }}>Шифрование</h2>
+      <div className="seg-group" style={{ flexDirection: 'column' }} role="radiogroup" aria-label="Алгоритм шифрования">
+        {node.data_cipher_options.map((option) => (
+          <button
+            key={option.key}
+            type="button"
+            role="radio"
+            className={`seg${draft === option.key ? ' on' : ''}`}
+            aria-checked={draft === option.key}
+            disabled={!editable || busy}
+            onClick={() => setDraft(option.key)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      {chosen?.gost && withoutGost.length > 0 && (
+        <div className="row-wrap" aria-label="Узлы без ГОСТ">
+          <span className="muted" style={{ fontSize: 12 }}>
+            Без ГОСТ:
+          </span>
+          {withoutGost.map((n) => (
+            <span key={n.id} className="chip warn mono">
+              {n.name}
+            </span>
+          ))}
+        </div>
+      )}
+      {editable && draft !== node.data_cipher && (
+        <div className="row-wrap">
+          <ConfirmButton
+            className="btn sm primary"
+            label="Сохранить"
+            armedLabel={
+              chosen?.gost
+                ? 'Телефоны и узлы без ГОСТ отключатся. Точно?'
+                : 'Старые профили отключатся. Точно?'
+            }
+            disabled={busy}
+            onConfirm={() => void save()}
+          />
+          <button className="btn sm" type="button" disabled={busy} onClick={() => setDraft(node.data_cipher)}>
+            Отмена
+          </button>
+        </div>
+      )}
+    </section>
+  )
+}
+
 /** The hub's side of site links: which of its networks the linked sites reach. */
 function HubLan({ node, editable }) {
   const mesh = useMesh()
@@ -609,6 +692,8 @@ export function NodePage() {
           </section>
 
           {node.is_hub && <ClientDns node={node} editable={editable} />}
+
+          {node.is_hub && <DataCipher node={node} editable={editable} />}
 
           {node.is_hub && <HubLan node={node} editable={editable} />}
 

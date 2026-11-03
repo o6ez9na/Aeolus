@@ -358,13 +358,13 @@ async def _build_transit(
             )
             for n in nodes
         }
-        return openvpn.render_transit_server_config(nodes), entries
+        return openvpn.render_transit_server_config(nodes, node), entries
 
     hub = await session.scalar(select(Node).where(Node.is_hub.is_(True)))
     if hub is None or not hub.address:
         # Nothing to dial yet; the node keeps serving whatever it already has.
         return "", {}
-    return openvpn.render_transit_client_config(node, hub.address), {}
+    return openvpn.render_transit_client_config(node, hub), {}
 
 
 async def _build_ccd(session: AsyncSession, node: Node, *, proto: str) -> dict[str, str]:
@@ -479,6 +479,7 @@ async def record_status(session: AsyncSession, node: Node, report: dict) -> bool
     node.tx_bytes = report.get("tx_bytes", 0)
     node.bandwidth_mbps = report.get("bandwidth_mbps", 0)
     node.agent_version = report.get("agent_version") or node.agent_version
+    node.gost_capable = bool(report.get("gost"))
 
     await _record_client_sessions(session, node, report.get("sessions", []))
 

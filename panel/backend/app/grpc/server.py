@@ -80,6 +80,7 @@ class NodeAgentServicer(agent_pb2_grpc.NodeAgentServicer):
             "bandwidth_mbps": request.bandwidth_mbps,
             "agent_version": request.agent_version,
             "config_revision": request.config_revision,
+            "gost": request.gost,
             "sessions": [
                 {
                     "common_name": s.common_name,

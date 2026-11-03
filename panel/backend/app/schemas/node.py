@@ -40,6 +40,20 @@ class NodeUpdate(BaseModel):
     client_dns: list[str] | None = Field(default=None, max_length=4)
     # Hub only: its LAN, offered to the sites linked to it. [] or null clears it.
     site_subnets: list[str] | None = Field(default=None, max_length=16)
+    # Hub only: the cipher the whole panel runs on. null goes back to the default.
+    data_cipher: str | None = Field(default=None, max_length=32)
+
+    @field_validator("data_cipher")
+    @classmethod
+    def _cipher_is_known(cls, value: str | None) -> str | None:
+        # Imported here: services import the schemas, not the other way round.
+        from app.services.openvpn import DATA_CIPHERS
+
+        if value is None:
+            return None
+        if value not in DATA_CIPHERS:
+            raise ValueError(f"{value!r} is not a cipher; one of {', '.join(DATA_CIPHERS)}")
+        return value
 
     @field_validator("site_subnets")
     @classmethod
@@ -72,6 +86,12 @@ class NodeUpdate(BaseModel):
             if address not in servers:
                 servers.append(address)
         return servers
+
+
+class DataCipherOption(BaseModel):
+    key: str
+    label: str
+    gost: bool
 
 
 class NodeRead(NodeBase):
@@ -116,9 +136,21 @@ class NodeRead(NodeBase):
     client_dns_default: list[str] = []
     # Set on the hub only (its LAN, for site links).
     site_subnets: list[str] = []
+    # Hub only: the cipher in force (the default when none was picked) and what
+    # can be picked.
+    data_cipher: str = ""
+    data_cipher_options: list[DataCipherOption] = []
+    # The node can load the GOST provider; null until its agent reports. The hub
+    # always can: its OpenVPN image ships the provider.
+    gost_capable: bool | None = None
     # What this site shares over its links: site_subnets on the hub, the
     # announced subnets anywhere else.
     site_networks: list[str] = []
+
+    @field_validator("data_cipher", mode="before")
+    @classmethod
+    def _null_cipher_is_empty(cls, value: str | None) -> str:
+        return value or ""
 
     @field_validator("subnets", "client_dns", "site_subnets", mode="before")
     @classmethod

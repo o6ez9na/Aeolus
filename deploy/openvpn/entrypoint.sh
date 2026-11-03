@@ -83,11 +83,17 @@ openvpn_pid=""
 openvpn_tcp_pid=""
 openvpn_transit_pid=""
 
+# Userspace data channel, as the hub has always run. Ubuntu's OpenVPN would
+# otherwise move it into the kernel wherever the host has ovpn-dco loaded, which
+# changes how every packet travels and cannot carry a CBC cipher (Kuznyechik)
+# anyway.
+OPENVPN_OPTS="--disable-dco"
+
 start_openvpn() {
     openvpn_pid=""
     if [ -f "$CONFIG_DIR/server.conf" ]; then
         echo "starting openvpn on $UPLINK, NAT for $VPN_SUBNET/$VPN_MASK"
-        openvpn --config "$CONFIG_DIR/server.conf" --cd "$CONFIG_DIR" &
+        openvpn --config "$CONFIG_DIR/server.conf" --cd "$CONFIG_DIR" $OPENVPN_OPTS &
         openvpn_pid=$!
     fi
 
@@ -96,7 +102,7 @@ start_openvpn() {
     openvpn_tcp_pid=""
     if [ -f "$CONFIG_DIR/server-tcp.conf" ]; then
         echo "starting openvpn tcp listener"
-        openvpn --config "$CONFIG_DIR/server-tcp.conf" --cd "$CONFIG_DIR" &
+        openvpn --config "$CONFIG_DIR/server-tcp.conf" --cd "$CONFIG_DIR" $OPENVPN_OPTS &
         openvpn_tcp_pid=$!
     fi
 
@@ -105,7 +111,7 @@ start_openvpn() {
     openvpn_transit_pid=""
     if [ -f "$CONFIG_DIR/transit.conf" ]; then
         echo "starting openvpn transit tunnel"
-        openvpn --config "$CONFIG_DIR/transit.conf" --cd "$CONFIG_DIR" &
+        openvpn --config "$CONFIG_DIR/transit.conf" --cd "$CONFIG_DIR" $OPENVPN_OPTS &
         openvpn_transit_pid=$!
     fi
 }
@@ -175,7 +181,7 @@ reconnect_rerouted_nodes() {
         [ -n "$name" ] || continue
         printf '%s\n' "$seen_ccd" | grep -qxF "$sum $name" && continue
         echo "routes of node $name changed, reconnecting it"
-        # busybox nc hangs up as soon as its input ends, which can be before
+        # nc can hang up as soon as its input ends, which can be before
         # OpenVPN has read the command; hold the line open for the answer.
         { printf 'kill %s\n' "$name"; sleep 1; printf 'quit\n'; } |
             nc -w 3 127.0.0.1 "$TRANSIT_MANAGEMENT_PORT" | tr -d '\r' | grep -E "^(SUCCESS|ERROR)" || true

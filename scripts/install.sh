@@ -57,13 +57,13 @@ t_en() {
     docker_no_plugin) echo "docker installed but 'docker compose' is missing";;
     net_check)        echo "checking that containers can reach the package mirrors";;
     net_ok)           echo "containers have working DNS and outbound HTTPS";;
-    net_broken)       echo "a container cannot reach the Alpine mirrors — this is what makes the build fail with 'no such package'";;
+    net_broken)       echo "a container cannot reach the Ubuntu archive — this is what makes the build fail with 'Unable to locate package'";;
     net_dns_try)      echo "pointing docker at public DNS servers and retrying";;
     net_dns_written)  echo "wrote %s and restarted docker";;
     net_daemon_exists) echo "%s already exists; leaving it alone";;
     net_manual)       echo "still no way out from a container. Fix DNS for docker, then run this script again. Usual causes: the provider's resolver, or a host with IPv6 that containers cannot use. Try: echo '{\"dns\":[\"1.1.1.1\",\"8.8.8.8\"]}' > /etc/docker/daemon.json && systemctl restart docker";;
     net_host_forced)  echo "host networking requested, skipping the bridge check";;
-    net_dns_fail)     echo "containers cannot resolve dl-cdn.alpinelinux.org";;
+    net_dns_fail)     echo "containers cannot resolve archive.ubuntu.com";;
     net_route_fail)   echo "containers resolve the mirror but cannot reach it";;
     net_host_ok)      echo "the host itself reaches it fine, so the problem is the docker bridge — building in the host namespace instead. Usual causes: a firewall dropping forwarded packets, docker started with iptables management off, or a bridge MTU larger than the uplink.";;
     hostnet_node)     echo "this node will also RUN in the host namespace: its agent has to dial the panel, and the bridge cannot. OpenVPN will bind the host's interfaces and its NAT rules will be the host's.";;
@@ -126,13 +126,13 @@ t_ru() {
     docker_no_plugin) echo "docker поставился, но 'docker compose' отсутствует";;
     net_check)        echo "проверяю, что контейнеры дотягиваются до зеркал пакетов";;
     net_ok)           echo "у контейнеров работает DNS и исходящий HTTPS";;
-    net_broken)       echo "контейнер не достаёт до зеркал Alpine — именно из-за этого сборка падает с 'no such package'";;
+    net_broken)       echo "контейнер не достаёт до архива Ubuntu — именно из-за этого сборка падает с 'Unable to locate package'";;
     net_dns_try)      echo "прописываю docker публичные DNS и пробую снова";;
     net_dns_written)  echo "записал %s и перезапустил docker";;
     net_daemon_exists) echo "%s уже существует, не трогаю его";;
     net_manual)       echo "из контейнера всё равно нет выхода. Почини DNS для docker и запусти скрипт снова. Обычные причины: резолвер провайдера или IPv6 на хосте, недоступный контейнерам. Попробуй: echo '{\"dns\":[\"1.1.1.1\",\"8.8.8.8\"]}' > /etc/docker/daemon.json && systemctl restart docker";;
     net_host_forced)  echo "host-сеть запрошена явно, проверку бриджа пропускаю";;
-    net_dns_fail)     echo "контейнеры не резолвят dl-cdn.alpinelinux.org";;
+    net_dns_fail)     echo "контейнеры не резолвят archive.ubuntu.com";;
     net_route_fail)   echo "контейнеры резолвят зеркало, но не достают до него";;
     net_host_ok)      echo "с самого хоста всё достаётся, значит дело в docker-бридже — собираю в host-namespace. Обычные причины: фаервол режет форвард, docker запущен без управления iptables, или MTU бриджа больше, чем у аплинка.";;
     hostnet_node)     echo "узел и работать будет в host-namespace: его агент обязан дозвониться до панели, а через бридж это не выходит. OpenVPN займёт интерфейсы хоста, и правила NAT будут хостовыми.";;
@@ -280,11 +280,14 @@ install_docker() {
 # services is often easier to reason about with the VPN in the host namespace.
 USE_HOST_NETWORK="${AEOLUS_HOST_NETWORK:-}"
 
-INDEX_URL="https://dl-cdn.alpinelinux.org/alpine/v3.22/main/x86_64/APKINDEX.tar.gz"
+# The OpenVPN image installs from the Ubuntu archive; that is the fetch a build
+# needs to succeed. The probe itself runs in alpine because it ships wget.
+MIRROR_HOST="archive.ubuntu.com"
+INDEX_URL="http://$MIRROR_HOST/ubuntu/dists/noble/InRelease"
 
 probe() { # probe <docker run args...> — resolve, then fetch, reporting which failed
   docker run --rm "$@" alpine:3.22 sh -c "
-    getent hosts dl-cdn.alpinelinux.org >/dev/null 2>&1 || exit 10
+    getent hosts $MIRROR_HOST >/dev/null 2>&1 || exit 10
     wget -q -T 15 -O /dev/null '$INDEX_URL' >/dev/null 2>&1 || exit 20
   " >/dev/null 2>&1
 }

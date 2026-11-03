@@ -5,6 +5,8 @@ __pycache__/
 
 # C extensions
 *.so
+# ...except the GOST provider anemoi carries for Entware (anemoi-rs/gost/README.md)
+!anemoi-rs/gost/entware-*/gostprov.so
 
 # Distribution / packaging
 .Python

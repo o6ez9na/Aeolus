@@ -1,0 +1,55 @@
+Kuznyechik CBC: work on aligned copies of the blocks.
+
+grasshopper_copy128() moves a block as 32/64-bit words whatever
+STRICT_ALIGNMENT says, and CBC handed it the caller's buffers directly.
+OpenVPN decrypts a packet in place at an offset that is not word aligned,
+so on MIPS the provider died with SIGBUS (or, where the kernel fixes up
+unaligned loads, crawled through a trap per word). Copy each block, and
+the chaining value, into aligned locals instead.
+
+--- a/gost_grasshopper_cipher.c
++++ b/gost_grasshopper_cipher.c
+@@ -558,30 +558,37 @@ static int gost_grasshopper_cipher_do_cbc(GOST_cipher_ctx *ctx, unsigned char *out,
+     unsigned char *current_out = out;
+     size_t blocks = inl / GRASSHOPPER_BLOCK_SIZE;
+     size_t i;
+-    grasshopper_w128_t *currentBlock;
++    grasshopper_w128_t chain;
++    grasshopper_w128_t *currentBlock = &chain;
+
+-    currentBlock = (grasshopper_w128_t *) iv;
++    memcpy(&chain, iv, GRASSHOPPER_BLOCK_SIZE);
+
+     for (i = 0; i < blocks;
+          i++, current_in += GRASSHOPPER_BLOCK_SIZE, current_out +=
+          GRASSHOPPER_BLOCK_SIZE) {
+-        grasshopper_w128_t *currentInputBlock = (grasshopper_w128_t *) current_in;
+-        grasshopper_w128_t *currentOutputBlock = (grasshopper_w128_t *) current_out;
++        grasshopper_w128_t inputBlock, outputBlock;
++        grasshopper_w128_t *currentInputBlock = &inputBlock;
++        grasshopper_w128_t *currentOutputBlock = &outputBlock;
++
++        memcpy(&inputBlock, current_in, GRASSHOPPER_BLOCK_SIZE);
+         if (encrypting) {
+             grasshopper_append128(currentBlock, currentInputBlock);
+             grasshopper_encrypt_block(&c->encrypt_round_keys, currentBlock,
+                                       currentOutputBlock, &c->buffer);
+             grasshopper_copy128(currentBlock, currentOutputBlock);
+         } else {
+             grasshopper_w128_t tmp;
+
+             grasshopper_copy128(&tmp, currentInputBlock);
+             grasshopper_decrypt_block(&c->decrypt_round_keys,
+                                       currentInputBlock, currentOutputBlock,
+                                       &c->buffer);
+             grasshopper_append128(currentOutputBlock, currentBlock);
+             grasshopper_copy128(currentBlock, &tmp);
+         }
++        memcpy(current_out, &outputBlock, GRASSHOPPER_BLOCK_SIZE);
+     }
+
++    memcpy(iv, &chain, GRASSHOPPER_BLOCK_SIZE);
++
+     return 1;
+ }
+

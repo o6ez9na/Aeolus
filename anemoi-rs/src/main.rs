@@ -10,6 +10,7 @@ mod config;
 mod enrol;
 mod firewall;
 mod fsutil;
+mod gost;
 mod install;
 mod join;
 mod logger;
@@ -276,6 +277,7 @@ async fn report_status(
         sessions: snapshot.sessions,
         agent_version: VERSION.into(),
         config_revision: revision.to_string(),
+        gost: gost::available(),
     })
     .await
     .map_err(describe_status)?;

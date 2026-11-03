@@ -163,6 +163,16 @@ impl Platform {
         }
     }
 
+    /// Whether the package manager has heard of a package at all, so an
+    /// optional one can be skipped quietly where the distribution lacks it.
+    fn package_known(&self, package: &str) -> bool {
+        match self.packages {
+            Packages::Apt => quiet("apt-cache", &["show", package]),
+            Packages::Dnf => quiet("dnf", &["-q", "info", package]),
+            _ => false,
+        }
+    }
+
     fn installed(&self, package: &str) -> bool {
         match self.packages {
             Packages::Apk => quiet("apk", &["info", "-e", package]),
@@ -462,6 +472,10 @@ fn install_inner(args: &[String]) -> Result<()> {
             "openvpn is still missing after installing packages",
         ));
     }
+
+    // 1b. GOST, for a panel that runs the network on Kuznyechik. Optional: the
+    // tunnel works on AES or ChaCha without it.
+    ensure_gost(&platform, &mut manifest);
 
     // 2. The tunnel device.
     ensure_tun(&platform)?;
@@ -1054,6 +1068,84 @@ fn stop_other_agents() {
 
 // --- doctor -------------------------------------------------------------------
 
+/// Put the GOST provider where OpenSSL finds it. Never fatal: a node without it
+/// still runs on AES or ChaCha, and the panel shows which nodes cannot do GOST.
+fn ensure_gost(platform: &Platform, manifest: &mut Manifest) {
+    if platform.kind == Kind::Entware {
+        let Some(bytes) = crate::gost::entware_module() else {
+            note(t(
+                "ГОСТ (Кузнечик): для этой архитектуры модуля нет",
+                "GOST (Kuznyechik): no module for this architecture",
+            ));
+            return;
+        };
+        let target = crate::gost::entware_target();
+        let written = target
+            .parent()
+            .map(fs::create_dir_all)
+            .transpose()
+            .and_then(|_| write_if_changed(&target, bytes, 0o644));
+        match written {
+            Ok(_) => {
+                let path = target.display().to_string();
+                if !manifest.files.contains(&path) {
+                    manifest.files.push(path);
+                }
+                ok(t(
+                    "ГОСТ (Кузнечик): модуль gostprov на месте",
+                    "GOST (Kuznyechik): gostprov module in place",
+                ));
+            }
+            Err(err) => note(t(
+                &format!("ГОСТ-модуль не записался в {}: {err}", target.display()),
+                &format!(
+                    "could not write the GOST module to {}: {err}",
+                    target.display()
+                ),
+            )),
+        }
+        return;
+    }
+
+    if crate::gost::available() {
+        ok(t("ГОСТ (Кузнечик) доступен", "GOST (Kuznyechik) available"));
+        return;
+    }
+    let package = match platform.packages {
+        Packages::Apt => Some("libengine-gost-openssl"),
+        Packages::Dnf => Some("openssl-gost-engine"),
+        _ => None,
+    };
+    match package {
+        Some(package) if platform.package_known(package) => {
+            step(t(
+                &format!("ставлю ГОСТ (Кузнечик): {package}"),
+                &format!("installing GOST (Kuznyechik): {package}"),
+            ));
+            match platform.install_packages(&[package]) {
+                Ok(()) => {
+                    if !manifest.packages_installed.iter().any(|p| p == package) {
+                        manifest.packages_installed.push(package.to_string());
+                    }
+                    if crate::gost::available() {
+                        ok(t("ГОСТ (Кузнечик) доступен", "GOST (Kuznyechik) available"));
+                    } else {
+                        note(t(
+                            &format!("{package} поставлен, но модуля gostprov в нём нет"),
+                            &format!("{package} is installed but has no gostprov module"),
+                        ));
+                    }
+                }
+                Err(err) => note(err),
+            }
+        }
+        _ => note(t(
+            "ГОСТ (Кузнечик) здесь недоступен: узел работает на AES и ChaCha, но не подключится, если панель переведут на Кузнечик",
+            "GOST (Kuznyechik) is not available here: the node runs on AES and ChaCha, but will not connect if the panel switches to Kuznyechik",
+        )),
+    }
+}
+
 pub fn doctor() -> i32 {
     let platform = Platform::detect();
     let mut failed = 0;
@@ -1090,6 +1182,16 @@ pub fn doctor() -> i32 {
         openvpn.is_some(),
         "openvpn".into(),
         t("anemoi install поставит его", "anemoi install installs it"),
+    );
+    // Not a failure: only a panel running on Kuznyechik needs it.
+    println!(
+        "{} {}",
+        if crate::gost::available() {
+            "ok  "
+        } else {
+            "--  "
+        },
+        t("ГОСТ (Кузнечик)", "GOST (Kuznyechik)")
     );
     check(
         Path::new("/dev/net/tun").exists(),

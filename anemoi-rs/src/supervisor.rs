@@ -101,20 +101,21 @@ pub fn patch_transit(original: &str, dev: &str, status_file: &Path, ws_host: &st
     }
 }
 
+/// Entware first: a Keenetic with the firmware's OpenVPN component also has a
+/// /usr/sbin/openvpn, patched to report to the router's core, and it exits with
+/// "Unable to communicate with NDM core" when run by anything else.
+const OPENVPN_PATHS: [&str; 4] = [
+    "/opt/sbin/openvpn",
+    "/usr/sbin/openvpn",
+    "/usr/local/sbin/openvpn",
+    "/sbin/openvpn",
+];
+
 pub fn find_openvpn(configured: &str) -> Option<PathBuf> {
     if !configured.is_empty() {
         return Some(PathBuf::from(configured));
     }
-    // OpenWrt, Entware (Keenetic), and the usual Linux places.
-    [
-        "/usr/sbin/openvpn",
-        "/opt/sbin/openvpn",
-        "/usr/local/sbin/openvpn",
-        "/sbin/openvpn",
-    ]
-    .iter()
-    .map(PathBuf::from)
-    .find(|p| p.exists())
+    OPENVPN_PATHS.iter().map(PathBuf::from).find(|p| p.exists())
 }
 
 impl Supervisor {
@@ -195,8 +196,9 @@ impl Supervisor {
     }
 
     fn start_openvpn(&mut self) -> Result<()> {
-        let openvpn = find_openvpn(&self.cfg.openvpn_bin)
-            .ok_or("openvpn is not installed (looked in /usr/sbin, /opt/sbin, /usr/local/sbin)")?;
+        let openvpn = find_openvpn(&self.cfg.openvpn_bin).ok_or(
+            "openvpn is not installed (looked in /opt/sbin, /usr/sbin, /usr/local/sbin, /sbin)",
+        )?;
         firewall::ensure_forwarding();
         let mut command = Command::new(&openvpn);
         command
@@ -332,6 +334,12 @@ fn split_https_url(url: &str) -> Option<(String, u16)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn entware_openvpn_comes_before_the_firmware_one() {
+        let at = |path| OPENVPN_PATHS.iter().position(|p| *p == path).unwrap();
+        assert!(at("/opt/sbin/openvpn") < at("/usr/sbin/openvpn"));
+    }
 
     const OBFUSCATED: &str = "# Aeolus transit · node home (через WebSocket)
 client

@@ -14,16 +14,19 @@ mod gost;
 mod install;
 mod join;
 mod logger;
+mod resolve;
 mod status;
 mod supervisor;
 mod tls;
 mod wsbridge;
 
 use std::collections::HashMap;
+use std::io;
 use std::time::Duration;
 
+use hyper_util::rt::TokioIo;
 use log::{error, info, warn};
-use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
+use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity, Uri};
 
 use crate::config::Config;
 use crate::enrol::Enrolment;
@@ -234,8 +237,18 @@ fn connect(cfg: &Config, enrolment: &Enrolment) -> Result<NodeAgentClient<Channe
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(30))
         .http2_keep_alive_interval(Duration::from_secs(60))
-        .connect_lazy();
+        .connect_with_connector_lazy(tower::service_fn(dial_panel));
     Ok(NodeAgentClient::new(channel))
+}
+
+/// The channel's TCP connection, through our resolver rather than hyper's.
+async fn dial_panel(uri: Uri) -> io::Result<TokioIo<tokio::net::TcpStream>> {
+    let host = uri
+        .host()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no host in the panel's URI"))?;
+    let stream = resolve::connect(host, uri.port_u16().unwrap_or(443)).await?;
+    stream.set_nodelay(true)?;
+    Ok(TokioIo::new(stream))
 }
 
 /// Fetch the configuration and write it. Returns whether OpenVPN has to be

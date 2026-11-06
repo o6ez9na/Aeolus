@@ -74,7 +74,7 @@ impl Bridge {
     async fn relay(&self, local: TcpStream) -> Result<()> {
         let remote = tokio::time::timeout(
             CONNECT_TIMEOUT,
-            TcpStream::connect((self.panel_host.as_str(), self.panel_port)),
+            crate::resolve::connect(&self.panel_host, self.panel_port),
         )
         .await
         .map_err(|_| {

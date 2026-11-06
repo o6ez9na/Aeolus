@@ -24,6 +24,7 @@ pub fn http_client(cfg: &Config) -> Result<reqwest::Client> {
     let tls = crate::tls::panel_client_config(cfg)?;
     Ok(reqwest::Client::builder()
         .use_preconfigured_tls((*tls).clone())
+        .dns_resolver(std::sync::Arc::new(crate::resolve::Resolver))
         .timeout(Duration::from_secs(30))
         .user_agent(format!("anemoi/{VERSION}"))
         .build()?)

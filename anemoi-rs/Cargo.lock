@@ -13,10 +13,11 @@ dependencies = [
 
 [[package]]
 name = "anemoi"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "base64 0.23.1",
  "futures-util",
+ "hyper-util",
  "libc",
  "log",
  "prost",
@@ -34,6 +35,7 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "tower",
  "webpki-roots",
 ]
 

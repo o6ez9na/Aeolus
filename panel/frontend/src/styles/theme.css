@@ -1,8 +1,10 @@
 /*
- * Graphite ground with three signal hues that never mean anything else:
- * green is a live session, blue is the transit and the primary action, violet
- * is "out to the internet". Light is the same structure with the ramp
- * inverted, so component CSS never branches on theme.
+ * Dark is One Dark Pro: its ground, and its syntax colours as three signal hues
+ * that never mean anything else: green is a live session, blue is the transit
+ * and the primary action, violet is "out to the internet". The theme has no step
+ * between its surfaces for --hover and --grid, and its comment grey is too faint
+ * for small text on a card, so those three are derived. Light is the same
+ * structure with the ramp inverted, so component CSS never branches on theme.
  */
 :root {
   --font-sans: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -21,35 +23,35 @@
 [data-theme='dark'] {
   color-scheme: dark;
 
-  --bg: #0e1012;
-  --surface: #15181b;
-  --raised: #1c2024;
-  --hover: #22272c;
-  --line: #262b30;
-  --line-strong: #353b42;
-  --grid: #20252a;
+  --bg: #21252b;
+  --surface: #282c34;
+  --raised: #2c313a;
+  --hover: #343a45;
+  --line: #3b4048;
+  --line-strong: #495162;
+  --grid: #323842;
 
-  --text: #e7e9eb;
-  --muted: #a3aab2;
-  --dim: #8b929a;
+  --text: #d7dae0;
+  --muted: #abb2bf;
+  --dim: #9198a6;
 
-  --live: #3fcf9a;
-  --live-soft: rgb(63 207 154 / 14%);
-  --transit: #6ea8fe;
+  --live: #98c379;
+  --live-soft: rgb(152 195 121 / 14%);
+  --transit: #61afef;
   /* Network transit between sites: the transit line turned bridge. */
-  --bridge: #2ee6d6;
-  --bridge-soft: rgb(46 230 214 / 16%);
-  --exit: #b197fc;
-  --exit-soft: rgb(177 151 252 / 14%);
-  --warn: #f2b45a;
-  --warn-soft: rgb(242 180 90 / 12%);
-  --err: #f2766b;
-  --err-soft: rgb(242 118 107 / 12%);
+  --bridge: #56b6c2;
+  --bridge-soft: rgb(86 182 194 / 16%);
+  --exit: #c678dd;
+  --exit-soft: rgb(198 120 221 / 14%);
+  --warn: #e5c07b;
+  --warn-soft: rgb(229 192 123 / 12%);
+  --err: #e06c75;
+  --err-soft: rgb(224 108 117 / 12%);
 
-  --accent: #6ea8fe;
-  --accent-soft: rgb(110 168 254 / 22%);
-  --on-accent: #08162b;
-  --knob: #0b1a14;
+  --accent: #61afef;
+  --accent-soft: rgb(97 175 239 / 22%);
+  --on-accent: #21252b;
+  --knob: #21252b;
 
   --shadow: 0 12px 32px rgb(0 0 0 / 38%);
   --scrim: rgb(0 0 0 / 55%);

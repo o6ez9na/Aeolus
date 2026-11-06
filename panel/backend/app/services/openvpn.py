@@ -117,7 +117,7 @@ def client_dns(node: Node) -> list[str]:
     return node.client_dns or [settings.vpn_dns]
 
 
-def _dns_push_lines(servers: list[str]) -> str:
+def dns_push_lines(servers: list[str]) -> str:
     # OpenVPN takes IPv6 resolvers under their own option name; a v6 address
     # given as plain DNS is ignored by most clients.
     return "\n".join(
@@ -152,7 +152,7 @@ ifconfig-pool {pool_start} {pool_end} {settings.vpn_netmask}
 # blackhole the clients that are only allowed to reach a couple of subnets.
 # Resolvers are set on the hub's page; one behind a LAN only answers clients
 # that have a route to that LAN.
-{_dns_push_lines(client_dns(node))}
+{dns_push_lines(client_dns(node))}
 
 ca ca.crt
 cert server.crt

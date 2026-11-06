@@ -189,6 +189,36 @@ reconnect_rerouted_nodes() {
     seen_ccd=$current
 }
 
+# A network behind a client is known to OpenVPN (its iroute) but not to the
+# kernel, which first has to send such packets into the right tun. OpenVPN cannot
+# set that route itself: it is running as nobody by the time a client connects,
+# and a `route` in server.conf could not say which listener the client is on
+# today. The status files say both. Our routes carry their own proto, so the rest
+# of main is left alone; main changing makes apply_plan copy them into the exit
+# tables too.
+CLIENT_NET_PROTO=223
+sync_client_networks() {
+    wanted=$(for log in /run/openvpn/status.log /run/openvpn/status-tcp.log; do
+        [ -f "$log" ] || continue
+        awk -F, '
+            /^ROUTING TABLE/ { table = 1; next }
+            /^GLOBAL STATS/ { table = 0 }
+            !table || $1 == "Virtual Address" { next }
+            $1 ~ /\// { owner[$1] = $2 }
+            $1 ~ /^[0-9.]+$/ { address[$2] = $1 }
+            END { for (net in owner) if (owner[net] in address) print net, address[owner[net]] }
+        ' "$log"
+    done) || wanted=""
+    printf '%s\n' "$wanted" | while read -r net via; do
+        [ -n "$net" ] || continue
+        ip route replace "$net" via "$via" proto "$CLIENT_NET_PROTO" 2>/dev/null || true
+    done
+    ip -4 route show proto "$CLIENT_NET_PROTO" | while read -r net _; do
+        printf '%s\n' "$wanted" | grep -q "^$net " ||
+            ip route del "$net" proto "$CLIENT_NET_PROTO" 2>/dev/null || true
+    done
+}
+
 apply_plan
 apply_node_nat
 reconnect_rerouted_nodes || true
@@ -223,6 +253,8 @@ while true; do
         start_openvpn
         continue
     fi
+
+    sync_client_networks || true
 
     # Rules follow the tunnels: a client that just got an exit must not wait for
     # a restart to get it.

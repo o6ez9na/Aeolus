@@ -2084,3 +2084,72 @@ button.chip:hover {
     bottom: calc(84px + env(safe-area-inset-bottom));
   }
 }
+
+/* --- Client page ---------------------------------------------------------- */
+.client-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  margin: 0;
+}
+
+.facts > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.facts dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.select.compact {
+  height: 28px;
+  width: auto;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.chip-x {
+  all: unset;
+  display: inline-flex;
+  margin-right: -3px;
+  border-radius: 4px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.chip-x:hover {
+  color: var(--text);
+}
+
+.chip-x:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.add-row {
+  display: flex;
+  gap: 8px;
+}
+
+.line-new {
+  color: var(--live);
+}
+
+.line-gone {
+  color: var(--err);
+  text-decoration: line-through;
+}

@@ -403,13 +403,19 @@ async def load_subnets_by_node(session: AsyncSession) -> dict:
 
 
 def render_client_ccd(
-    node: Node, client: Client, *, proto: str, subnets_by_node: dict
+    node: Node,
+    client: Client,
+    *,
+    proto: str,
+    subnets_by_node: dict,
+    draft: ccd_service.ClientNetwork | None = None,
 ) -> str:
     """The ccd entry ``node`` holds for ``client`` on one listener.
 
     The one place that decides what goes into a client's file: the agent writes
     it, and the panel's preview shows it, so the two cannot disagree.
-    ``client.grants`` must be loaded.
+    ``client.grants`` must be loaded. ``draft`` shows the file with settings that
+    are not saved yet.
     """
     grant = next((g for g in client.grants if g.node_id == node.id), None)
     if node.is_hub:
@@ -434,11 +440,10 @@ def render_client_ccd(
             )
 
     return ccd_service.render(
-        grant,
         client.common_name,
         proto=proto,
         allowed=allowed,
-        tunnel_host=client.tunnel_host if node.is_hub else None,
+        network=(draft or ccd_service.ClientNetwork.of(client)) if node.is_hub else None,
         default_route=default_route,
         routes=sorted(set(routes)),
     )
@@ -451,6 +456,7 @@ async def preview_client_ccd(
     proto: str = "udp",
     hub: Node | None = None,
     subnets_by_node: dict | None = None,
+    draft: ccd_service.ClientNetwork | None = None,
 ) -> str:
     """What OpenVPN actually reads for this client.
 
@@ -466,7 +472,9 @@ async def preview_client_ccd(
         return "# хаб ещё не создан — файла нет\n"
     if subnets_by_node is None:
         subnets_by_node = await load_subnets_by_node(session)
-    return render_client_ccd(hub, client, proto=proto, subnets_by_node=subnets_by_node)
+    return render_client_ccd(
+        hub, client, proto=proto, subnets_by_node=subnets_by_node, draft=draft
+    )
 
 
 async def record_status(session: AsyncSession, node: Node, report: dict) -> bool:

@@ -80,7 +80,7 @@ export function TrafficPage() {
                 {sessions.map(({ client, rx, tx }) => (
                   <tr key={client.id}>
                     <td>
-                      <Link className="mono" to={`/clients?open=${client.id}`} style={{ color: 'var(--text)', fontWeight: 600, textDecoration: 'none' }}>
+                      <Link className="mono" to={`/clients/${client.id}`} style={{ color: 'var(--text)', fontWeight: 600, textDecoration: 'none' }}>
                         {client.common_name}
                       </Link>
                     </td>

@@ -41,7 +41,7 @@ def ordered(a: uuid.UUID, b: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
     return (a, b) if a < b else (b, a)
 
 
-def _reserved() -> list[ipaddress.IPv4Network]:
+def reserved_networks() -> list[ipaddress.IPv4Network]:
     """The panel's own address space, which no site may claim."""
     return [
         ipaddress.ip_network(f"{net}/{settings.vpn_netmask}", strict=False)
@@ -68,7 +68,7 @@ def _usable(node: Node) -> bool:
 def check_networks(node: Node, networks: list[str]) -> None:
     """A site's networks must not take the panel's own address space."""
     for net in _networks(networks):
-        for reserved in _reserved():
+        for reserved in reserved_networks():
             if net.overlaps(reserved):
                 raise LinkError(
                     f"{net} пересекается с адресами самой панели ({reserved}): "

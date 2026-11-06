@@ -9,26 +9,23 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import CurrentUser, OperatorUser, SessionDep
 from app.core.crypto import SecretUnreadableError, decrypt_secret, encrypt_secret
 from app.core.security import generate_password, hash_password
-from app.models.node import (
-    Client,
-    ClientGroup,
-    ClientNodeGrant,
-    ClientStatus,
-    Node,
-    NodeApproval,
-)
+from app.models.node import Client, ClientGroup, ClientNodeGrant, Node
 from app.schemas.node import (
     ClientCreate,
+    ClientFilePreview,
     ClientGrantRead,
     ClientImportCredentials,
     ClientImportPassword,
+    ClientNetworkDraft,
     ClientRead,
     ClientSessionRead,
     ClientUpdate,
 )
-from app.services import audit, ccd, groups, openvpn, pki, routing
+from app.services import agent, audit, ccd, groups, openvpn, pki, routing
 
 router = APIRouter(prefix="/clients", tags=["clients"])
+
+NETWORK_FIELDS = ("tunnel_host", "push_routes", "iroutes", "push_options", "dns_servers")
 
 
 def _serialize(client: Client, sessions: dict[str, dict] | None = None) -> ClientRead:
@@ -56,6 +53,7 @@ def _serialize(client: Client, sessions: dict[str, dict] | None = None) -> Clien
     data.group_name = client.group.name if client.group is not None else None
     if client.tunnel_host is not None:
         data.tunnel_address = openvpn.static_address("udp", client.tunnel_host)
+        data.tunnel_address_tcp = openvpn.static_address("tcp", client.tunnel_host)
     exit_grant = next((g for g in client.grants if g.is_exit), None)
     data.exit_node_id = exit_grant.node_id if exit_grant else None
     data.import_enabled = client.import_password_enc is not None
@@ -182,15 +180,28 @@ async def update_client(
     node_ids = payload.pop("node_ids", None)
     group_change = "group_id" in payload
     new_group_id = payload.pop("group_id", None)
+    network_changes = {key: payload.pop(key) for key in NETWORK_FIELDS if key in payload}
     for field, value in payload.items():
         setattr(client, field, value)
 
+    if network_changes:
+        try:
+            network = await ccd.resolve_network(session, client, network_changes)
+        except ccd.CcdError as exc:
+            await session.rollback()
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+        client.tunnel_host = network.tunnel_host
+        client.push_routes = network.push_routes or None
+        client.iroutes = network.iroutes or None
+        client.push_options = network.push_options or None
+        client.dns_servers = network.dns_servers or None
+
     if node_ids is not None:
         await _validate_nodes(session, node_ids)
-        # Keep the existing grant rows for nodes that stay: they carry the ccd
-        # settings, and rebuilding the list from scratch would silently drop a
-        # client's fixed address and routes. What the group gives is not the
-        # client's to drop one node at a time, so those rows stay as well.
+        # Keep the existing grant rows for nodes that stay: they carry the exit
+        # and the scope, and rebuilding the list from scratch would silently drop
+        # them. What the group gives is not the client's to drop one node at a
+        # time, so those rows stay as well.
         from_group = [grant for grant in client.grants if grant.group_id is not None]
         covered = {grant.node_id for grant in from_group}
         existing = {grant.node_id: grant for grant in client.grants}
@@ -215,9 +226,34 @@ async def update_client(
         target_label=client.common_name,
         detail=audit.changed_fields(body.model_dump(exclude_unset=True)),
     )
-    await openvpn.sync_routing_plan(session)
-    await session.commit()
+    try:
+        await session.flush()
+        await openvpn.sync_routing_plan(session)
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        # Checked above; this is someone taking the address in between.
+        raise HTTPException(status.HTTP_409_CONFLICT, "этот адрес уже занят") from None
     return _serialize(await _load(session, client_id))
+
+
+@router.post("/{client_id}/ccd/preview", response_model=ClientFilePreview)
+async def preview_client_ccd(
+    client_id: uuid.UUID,
+    body: ClientNetworkDraft,
+    session: SessionDep,
+    _: OperatorUser,
+) -> ClientFilePreview:
+    """The file this client would get with these settings. Nothing is saved."""
+    client = await _load(session, client_id)
+    changes = body.model_dump(exclude_unset=True, exclude={"proto"})
+    try:
+        draft = await ccd.resolve_network(session, client, changes)
+    except ccd.CcdError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+    return ClientFilePreview(
+        text=await agent.preview_client_ccd(session, client, proto=body.proto, draft=draft)
+    )
 
 
 @router.get("/{client_id}/ccd", response_class=PlainTextResponse)
@@ -227,35 +263,10 @@ async def client_ccd(
     _: CurrentUser,
     proto: str = "udp",
 ) -> str:
-    """The file the hub hands this client at connect time, as it is written.
-
-    Built the way the agent builds it for the hub: every network the client's
-    grants open, its exit, its address.
-    """
+    """The file the hub hands this client at connect time, as it is written."""
     client = await _load(session, client_id)
-    hub = await session.scalar(select(Node).where(Node.is_hub.is_(True)))
-    subnets = {
-        node.id: node.subnets or []
-        for node in await session.scalars(
-            select(Node).where(Node.approval == NodeApproval.approved, Node.is_enabled.is_(True))
-        )
-    }
-    allowed = client.status == ClientStatus.active
-    routes: list[str] = []
-    default_route = False
-    if allowed:
-        for held in client.grants:
-            default_route = default_route or held.is_exit
-            routes.extend(groups.grant_networks(held.networks, subnets.get(held.node_id, [])))
-    own = next((g for g in client.grants if hub and g.node_id == hub.id), None)
-    return ccd.render(
-        own,
-        client.common_name,
-        proto="tcp" if proto == "tcp" else "udp",
-        allowed=allowed,
-        tunnel_host=client.tunnel_host,
-        default_route=default_route,
-        routes=sorted(set(routes)),
+    return await agent.preview_client_ccd(
+        session, client, proto="tcp" if proto == "tcp" else "udp"
     )
 
 

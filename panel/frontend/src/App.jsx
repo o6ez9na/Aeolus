@@ -1,11 +1,11 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useSearchParams } from 'react-router-dom'
 
 import { AuthProvider } from './auth/AuthContext'
 import { RequireAuth } from './auth/RequireAuth'
 import { AppShell } from './components/AppShell'
 import { ToastProvider } from './components/Toast'
 import { AuditPage } from './pages/AuditPage'
-import { CcdPage } from './pages/CcdPage'
+import { ClientPage } from './pages/ClientPage'
 import { ClientsPage } from './pages/ClientsPage'
 import { LoginPage } from './pages/LoginPage'
 import { MapPage } from './pages/MapPage'
@@ -14,6 +14,13 @@ import { NodesPage } from './pages/NodesPage'
 import { PkiPage } from './pages/PkiPage'
 import { TrafficPage } from './pages/TrafficPage'
 import { ThemeProvider } from './theme/ThemeContext'
+
+/** The access page is gone; old links land on what replaced it. */
+function FormerAccessPage() {
+  const [params] = useSearchParams()
+  const client = params.get('client')
+  return <Navigate to={client ? `/clients/${client}` : '/clients'} replace />
+}
 
 export default function App() {
   return (
@@ -32,9 +39,10 @@ export default function App() {
               >
                 <Route path="/map" element={<MapPage />} />
                 <Route path="/clients" element={<ClientsPage />} />
+                <Route path="/clients/:clientId" element={<ClientPage />} />
                 <Route path="/nodes" element={<NodesPage />} />
                 <Route path="/nodes/:nodeId" element={<NodePage />} />
-                <Route path="/ccd" element={<CcdPage />} />
+                <Route path="/ccd" element={<FormerAccessPage />} />
                 <Route path="/pki" element={<PkiPage />} />
                 <Route path="/traffic" element={<TrafficPage />} />
                 <Route path="/audit" element={<AuditPage />} />

@@ -1,15 +1,10 @@
 import { useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { authorizedDownload } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { PageHead } from '../components/AppShell'
-import {
-  ClientInspector,
-  expiryFrom,
-  generatePassword,
-  importHandout,
-} from '../components/ClientInspector'
+import { expiryFrom, generatePassword, importHandout } from '../components/ClientInspector'
 import { GroupEditor } from '../components/GroupEditor'
 import { Icon } from '../components/Icon'
 import { Drawer } from '../components/Overlay'
@@ -464,6 +459,7 @@ function BulkBar({ selected, onClear }) {
 export function ClientsPage() {
   const { user } = useAuth()
   const mesh = useMesh()
+  const navigate = useNavigate()
   const editable = canEdit(user)
   const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState('')
@@ -485,7 +481,7 @@ export function ClientsPage() {
         else p.delete(key)
         return p
       },
-      { replace: key !== 'open' },
+      { replace: true },
     )
 
   const clients = useMemo(() => mesh.clients ?? [], [mesh.clients])
@@ -506,7 +502,8 @@ export function ClientsPage() {
 
   const maxBytes = Math.max(1, ...clients.map((c) => sessionBytes(c).rx + sessionBytes(c).tx))
   const selected = clients.filter((c) => checked.includes(c.id))
-  const open = clients.find((c) => c.id === openId)
+  // Links from before a client had a page of its own.
+  if (openId) return <Navigate to={`/clients/${openId}`} replace />
 
   if (mesh.loading) {
     return (
@@ -721,7 +718,7 @@ export function ClientsPage() {
                   <tr
                     key={client.id}
                     className={`clickable${checked.includes(client.id) ? ' sel' : ''}`}
-                    onClick={() => setParam('open', client.id)}
+                    onClick={() => navigate(`/clients/${client.id}`)}
                   >
                     {editable && (
                       <td onClick={(event) => event.stopPropagation()}>
@@ -748,7 +745,7 @@ export function ClientsPage() {
                             style={{ all: 'unset', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontWeight: 600, whiteSpace: 'nowrap' }}
                             onClick={(event) => {
                               event.stopPropagation()
-                              setParam('open', client.id)
+                              navigate(`/clients/${client.id}`)
                             }}
                           >
                             {client.common_name}
@@ -820,27 +817,12 @@ export function ClientsPage() {
         </div>
       </section>
 
-      {open && (
-        <Drawer title="Клиент" onClose={() => setParam('open', null)}>
-          <ClientInspector key={open.id} client={open} />
-        </Drawer>
-      )}
       {openGroup && (mesh.groups ?? []).find((g) => g.id === openGroup) && (
         <Drawer title="Группа" onClose={() => setParam('editgroup', null)} width={440}>
           <GroupEditor
             key={openGroup}
             group={mesh.groups.find((g) => g.id === openGroup)}
-            onSelectClient={(client) =>
-              setParams(
-                (prev) => {
-                  const p = new URLSearchParams(prev)
-                  p.delete('editgroup')
-                  p.set('open', client.id)
-                  return p
-                },
-                { replace: true },
-              )
-            }
+            onSelectClient={(client) => navigate(`/clients/${client.id}`)}
             onDeleted={() => setParam('editgroup', null)}
           />
         </Drawer>
@@ -849,17 +831,7 @@ export function ClientsPage() {
         <NewClient
           initialGroup={groupFilter && groupFilter !== 'none' ? groupFilter : ''}
           onClose={() => setParam('new', null)}
-          onCreated={(client) =>
-            setParams(
-              (prev) => {
-                const p = new URLSearchParams(prev)
-                p.delete('new')
-                p.set('open', client.id)
-                return p
-              },
-              { replace: true },
-            )
-          }
+          onCreated={(client) => navigate(`/clients/${client.id}`)}
         />
       )}
     </>

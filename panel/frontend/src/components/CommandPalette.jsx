@@ -26,7 +26,6 @@ export function CommandPalette({ onClose }) {
       { key: 'p-map', label: 'Карта сети', kind: 'раздел', run: go('/map') },
       { key: 'p-clients', label: 'Клиенты', kind: 'раздел', run: go('/clients') },
       { key: 'p-nodes', label: 'Узлы', kind: 'раздел', run: go('/nodes') },
-      { key: 'p-ccd', label: 'Доступ (ccd)', kind: 'раздел', run: go('/ccd') },
       { key: 'p-pki', label: 'PKI и сертификаты', kind: 'раздел', run: go('/pki') },
       { key: 'p-traffic', label: 'Трафик', kind: 'раздел', run: go('/traffic') },
       { key: 'p-audit', label: 'Аудит', kind: 'раздел', run: go('/audit') },
@@ -45,7 +44,7 @@ export function CommandPalette({ onClose }) {
         dot: dotClass(state),
         mono: true,
         kind: 'клиент',
-        run: go(`/map?sel=client:${client.id}`),
+        run: go(`/clients/${client.id}`),
       }
     })
     const nodeItems = (nodes ?? [])
@@ -71,7 +70,7 @@ export function CommandPalette({ onClose }) {
     }))
     const all = [...clientItems, ...groupItems, ...nodeItems, ...base]
     const q = query.trim().toLowerCase()
-    if (!q) return [...base.slice(0, 7), ...clientItems.slice(0, 6), ...nodeItems.slice(0, 6), ...base.slice(7)]
+    if (!q) return [...base.slice(0, 6), ...clientItems.slice(0, 6), ...nodeItems.slice(0, 6), ...base.slice(7)]
     return all.filter((item) => `${item.label} ${item.sub ?? ''}`.toLowerCase().includes(q))
   }, [clients, nodes, groups, query, navigate, toggle, logout])
 

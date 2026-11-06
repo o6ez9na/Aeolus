@@ -265,6 +265,11 @@ class ClientRead(BaseModel):
     traffic_used_bytes: int
     tunnel_host: int | None = None
     tunnel_address: str | None = None
+    tunnel_address_tcp: str | None = None
+    push_routes: list[str] | None = None
+    iroutes: list[str] | None = None
+    push_options: list[str] | None = None
+    dns_servers: list[str] | None = None
     exit_node_id: uuid.UUID | None = None
     cert_serial: str | None
     cert_not_after: datetime | None
@@ -315,3 +320,24 @@ class ClientUpdate(BaseModel):
     node_ids: list[uuid.UUID] | None = None
     # Sent as null to take the client out of its group.
     group_id: uuid.UUID | None = None
+    tunnel_host: int | None = Field(default=None, ge=1, le=254)
+    push_routes: list[str] | None = Field(default=None, max_length=32)
+    iroutes: list[str] | None = Field(default=None, max_length=32)
+    push_options: list[str] | None = Field(default=None, max_length=32)
+    # Sent as null or empty to go back to what the hub pushes to everyone.
+    dns_servers: list[str] | None = Field(default=None, max_length=4)
+
+
+class ClientNetworkDraft(BaseModel):
+    """Settings to preview without saving. Unset fields stay as they are."""
+
+    proto: str = Field(default="udp", pattern=r"^(udp|tcp)$")
+    tunnel_host: int | None = Field(default=None, ge=1, le=254)
+    push_routes: list[str] | None = Field(default=None, max_length=32)
+    iroutes: list[str] | None = Field(default=None, max_length=32)
+    push_options: list[str] | None = Field(default=None, max_length=32)
+    dns_servers: list[str] | None = Field(default=None, max_length=4)
+
+
+class ClientFilePreview(BaseModel):
+    text: str

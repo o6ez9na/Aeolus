@@ -9,42 +9,20 @@ class ExitUpdate(BaseModel):
     is_exit: bool
 
 
-class CcdUpdate(BaseModel):
-    """Per-client settings on one node. Unset fields are left alone."""
-
-    static_host: int | None = Field(default=None, ge=1, le=254)
-    push_routes: list[str] | None = Field(default=None, max_length=32)
-    iroutes: list[str] | None = Field(default=None, max_length=32)
-    push_options: list[str] | None = Field(default=None, max_length=32)
+class GrantUpdate(BaseModel):
     # Only part of the node's LAN; null for all of it.
     networks: list[str] | None = Field(default=None, max_length=64)
 
 
-class CcdRead(BaseModel):
+class GrantRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     client_id: uuid.UUID
     node_id: uuid.UUID
-    client_name: str
-    client_status: str
-    node_name: str
-    node_is_hub: bool = False
     is_exit: bool = False
-    # The client's address on the hub, which every rule about it is written by.
-    tunnel_address: str | None = None
-    node_subnets: list[str] = []
-    static_host: int | None = None
-    # The addresses that host number turns into, one per listener.
-    static_address: str | None = None
-    static_address_tcp: str | None = None
-    push_routes: list[str] = []
-    iroutes: list[str] = []
-    push_options: list[str] = []
     networks: list[str] | None = None
     group_id: uuid.UUID | None = None
-    # Rendered file, so an operator can see exactly what the node will read.
-    preview: str = ""
 
 
 class CcdLimits(BaseModel):

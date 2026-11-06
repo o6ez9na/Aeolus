@@ -23,6 +23,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.models.node import Client, ClientNodeGrant, ClientStatus, Node, NodeApproval
 from app.services import links as links_service
+from app.services.ccd import ClientNetwork
 from app.services.groups import grant_networks
 
 
@@ -112,6 +113,13 @@ async def build_plan(session: AsyncSession) -> dict:
                     if node.transit_host is not None
                     else None
                 )
+
+        # A pushed route is advice; this is what actually lets the client there.
+        network = ClientNetwork.of(client)
+        allow.extend(network.reachable)
+        # Behind a client is a site like any other: only those granted reach it,
+        # an exit does not hand it over, and it starts nothing through the hub.
+        mesh.extend(network.iroutes)
 
         entries.append(
             {

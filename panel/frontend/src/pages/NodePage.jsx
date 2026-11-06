@@ -634,7 +634,7 @@ export function NodePage() {
                             <span className={dotClass(cs)} />
                             <Link
                               className="mono"
-                              to={`/clients?open=${client.id}`}
+                              to={`/clients/${client.id}`}
                               style={{ color: 'var(--text)', fontWeight: 600, textDecoration: 'none' }}
                             >
                               {client.common_name}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { api, apiText } from '../api/client'
+import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { formatAgo, formatBytes, formatDate, formatSince } from '../lib/format'
 import { useMesh } from '../lib/mesh'
@@ -20,7 +20,7 @@ import { ConfirmButton } from './ConfirmButton'
 import { Icon } from './Icon'
 import { ScopeEditor } from './ScopeEditor'
 
-const EXPIRY_CHOICES = [
+export const EXPIRY_CHOICES = [
   ['', 'Срок'],
   ['30', '+30 дней'],
   ['90', '+90 дней'],
@@ -47,33 +47,11 @@ export function importHandout(username, password) {
   return `Адрес: ${window.location.host}\nЛогин: ${username}\nПароль: ${password}`
 }
 
-function CcdPreview({ client }) {
-  const [text, setText] = useState(null)
-  const [error, setError] = useState(null)
-  const signature = JSON.stringify(client.access)
-  useEffect(() => {
-    let live = true
-    apiText(`/clients/${client.id}/ccd`)
-      .then((t) => live && setText(t))
-      .catch((err) => live && setError(err.message))
-    return () => {
-      live = false
-    }
-  }, [client.id, signature])
-  if (error) return <div className="form-error">{error}</div>
-  if (text === null) return <div className="hint">загрузка…</div>
-  return (
-    <pre className="code wrap" style={{ fontSize: 11.5 }}>
-      {text.trim()}
-    </pre>
-  )
-}
-
 /**
  * Setting a client up from OpenVPN Connect itself: the person types the
  * panel's address, their name and a password, and the app fetches the profile.
  */
-function ProfileImport({ client, editable }) {
+export function ProfileImport({ client, editable }) {
   const mesh = useMesh()
   const [busy, setBusy] = useState(false)
   const [issued, setIssued] = useState(null)
@@ -158,6 +136,224 @@ function ProfileImport({ client, editable }) {
   )
 }
 
+/** One line about where the client is right now. */
+export function clientStatusText(client) {
+  const state = clientState(client)
+  if (state === 'online') return `в сети ${formatSince(client.session.connected_since)}`
+  if (state === 'offline') return `не в сети, был ${formatAgo(client.last_seen_at)}`
+  return CLIENT_STATE_LABEL[state]
+}
+
+function useBusy() {
+  const [busy, setBusy] = useState(false)
+  async function act(fn) {
+    setBusy(true)
+    try {
+      await fn()
+    } catch {
+      // The mesh actions already reported the error.
+    } finally {
+      setBusy(false)
+    }
+  }
+  return [busy, act]
+}
+
+/** The note an operator keeps about a client, editable in place. */
+export function ClientLabel({ client, status = null, warn = false }) {
+  const { user } = useAuth()
+  const mesh = useMesh()
+  const editable = canEdit(user)
+  const [busy, act] = useBusy()
+  const [editing, setEditing] = useState(false)
+  const [label, setLabel] = useState(client.label ?? '')
+  const text = [client.label, status].filter(Boolean).join(', ')
+
+  if (editing) {
+    return (
+      <form
+        className="row-wrap"
+        onSubmit={(event) => {
+          event.preventDefault()
+          setEditing(false)
+          void act(() => mesh.updateClient(client, { label: label.trim() || null }, 'Подпись сохранена'))
+        }}
+      >
+        <input
+          className="input"
+          style={{ flex: 1, minWidth: 160 }}
+          autoFocus
+          value={label}
+          maxLength={128}
+          placeholder="Телефон Ани"
+          aria-label="Подпись клиента"
+          onChange={(event) => setLabel(event.target.value)}
+        />
+        <button className="btn sm" type="submit" disabled={busy}>
+          Сохранить
+        </button>
+      </form>
+    )
+  }
+  return (
+    <div className="row-wrap" style={{ gap: 6 }}>
+      <span className={warn ? 'warn-text' : text ? 'muted' : 'dim'} style={{ fontSize: 13 }}>
+        {text || 'без подписи'}
+      </span>
+      {editable && (
+        <button
+          className="icon-btn"
+          type="button"
+          style={{ width: 28, height: 28 }}
+          aria-label="Изменить подпись"
+          onClick={() => setEditing(true)}
+        >
+          <Icon name="edit" size={14} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** Which nodes this client may reach, and how much of each. */
+export function ClientAccessList({ client }) {
+  const { user } = useAuth()
+  const mesh = useMesh()
+  const editable = canEdit(user)
+  const [busy, act] = useBusy()
+  const [scopeFor, setScopeFor] = useState(null)
+  const group = (mesh.groups ?? []).find((g) => g.id === client.group_id) ?? null
+  const nodes = (mesh.nodes ?? [])
+    .filter((n) => n.approval === 'approved')
+    .sort((a, b) => Number(b.is_hub) - Number(a.is_hub) || a.name.localeCompare(b.name))
+
+  return (
+    <div className="stack" style={{ gap: 6 }}>
+      <div className="panel-head">
+        <span className="lbl">Доступ к узлам</span>
+        <span className="hint">
+          {client.access.length} из {nodes.length}
+        </span>
+      </div>
+      <div className="bleed">
+        {nodes.map((node) => {
+          const grant = client.access.find((g) => g.node_id === node.id)
+          const on = Boolean(grant)
+          const fromGroup = Boolean(grant?.group_id)
+          const locked = !editable || busy || fromGroup
+          const down = nodeState(node) !== 'up'
+          return (
+            <div key={node.id} className="stack" style={{ gap: 0 }}>
+              <div className="row-wrap" style={{ flexWrap: 'nowrap', gap: 0 }}>
+                <button
+                  type="button"
+                  className="trow"
+                  aria-pressed={on}
+                  aria-disabled={locked}
+                  title={fromGroup ? `Выдано группой «${group?.name}»: меняется в группе` : undefined}
+                  onClick={() => {
+                    if (locked) return
+                    void act(() => (on ? mesh.revoke(client, node.id) : mesh.grant(client, node.id)))
+                  }}
+                >
+                  <span className={on ? 'sw on' : 'sw'} style={fromGroup ? { opacity: 0.6 } : undefined} />
+                  <span className="t-main">
+                    <span className="t-title mono">{node.name}</span>
+                    <span className={`t-sub${node.is_hub ? '' : ' mono'}${grant?.networks ? ' exit-text' : ''}`}>
+                      {node.is_hub ? 'сама панель' : scopeText(grant?.networks ?? null, node.subnets) || 'сетей не объявил'}
+                    </span>
+                  </span>
+                  {fromGroup && <span className="chip" style={{ height: 22 }}>группа</span>}
+                  {down && <span className="err-text" style={{ fontSize: 11 }}>недоступен</span>}
+                </button>
+                {editable && on && !fromGroup && !node.is_hub && node.subnets.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn sm ghost"
+                    aria-expanded={scopeFor === node.id}
+                    onClick={() => setScopeFor(scopeFor === node.id ? null : node.id)}
+                  >
+                    {grant.networks ? 'Изменить' : 'Сузить'}
+                  </button>
+                )}
+              </div>
+              {scopeFor === node.id && grant && (
+                <div style={{ padding: '4px 10px 12px' }}>
+                  <ScopeEditor
+                    node={node}
+                    networks={grant.networks}
+                    busy={busy}
+                    onCancel={() => setScopeFor(null)}
+                    onSave={(networks) =>
+                      void act(async () => {
+                        await mesh.setGrantScope(grant, networks, `${client.common_name} → ${node.name}`)
+                        setScopeFor(null)
+                      })
+                    }
+                  />
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** Where this client's internet leaves, if it leaves at all. */
+export function ClientExitOptions({ client }) {
+  const { user } = useAuth()
+  const mesh = useMesh()
+  const editable = canEdit(user)
+  const [busy, act] = useBusy()
+  const exit = exitGrant(client)
+  const group = (mesh.groups ?? []).find((g) => g.id === client.group_id) ?? null
+  const groupExit = group?.grants.find((g) => g.is_exit) ?? null
+
+  return (
+    <div
+      className="bleed"
+      style={{ gap: 4, opacity: groupExit ? 0.55 : 1 }}
+      title={groupExit ? `Выход задаёт группа «${group.name}»` : undefined}
+    >
+      <button
+        type="button"
+        className={`opt${exit ? '' : ' on'}`}
+        aria-pressed={!exit}
+        disabled={!editable || busy || Boolean(groupExit)}
+        onClick={() => void act(() => mesh.setExit(client, null))}
+      >
+        <span className="radio" />
+        <span className="t-main" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span style={{ fontSize: 13, fontWeight: 500 }}>Не выпускать</span>
+          <span className="hint">только разрешённые сети</span>
+        </span>
+      </button>
+      {client.access.map((grant) => (
+        <button
+          key={grant.grant_id}
+          type="button"
+          className={`opt${grant.is_exit ? ' on' : ''}`}
+          aria-pressed={grant.is_exit}
+          disabled={!editable || busy || Boolean(groupExit)}
+          onClick={() => void act(() => mesh.setExit(client, grant.node_id))}
+        >
+          <span className="radio" />
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 13, fontWeight: 500 }}>
+              Через <span className="mono">{grant.node_name}</span>
+            </span>
+            <span className="hint">
+              {grant.node_is_hub ? 'IP панели' : 'IP узла, его сети тоже видны'}
+            </span>
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 /**
  * Everything about one client in one column: where it may go, where its
  * internet leaves, its profile. The same component sits beside the map and in
@@ -168,18 +364,9 @@ export function ClientInspector({ client }) {
   const mesh = useMesh()
   const editable = canEdit(user)
   const [busy, setBusy] = useState(false)
-  const [ccdOpen, setCcdOpen] = useState(false)
-  const [editingLabel, setEditingLabel] = useState(false)
-  const [label, setLabel] = useState(client.label ?? '')
 
-  const [scopeFor, setScopeFor] = useState(null)
   const state = clientState(client)
   const exit = exitGrant(client)
-  const group = (mesh.groups ?? []).find((g) => g.id === client.group_id) ?? null
-  const groupExit = group?.grants.find((g) => g.is_exit) ?? null
-  const nodes = (mesh.nodes ?? [])
-    .filter((n) => n.approval === 'approved')
-    .sort((a, b) => Number(b.is_hub) - Number(a.is_hub) || a.name.localeCompare(b.name))
   const bytes = sessionBytes(client)
   const nets = clientNetworks(client)
 
@@ -194,12 +381,7 @@ export function ClientInspector({ client }) {
     }
   }
 
-  const status =
-    state === 'online'
-      ? `в сети ${formatSince(client.session.connected_since)}`
-      : state === 'offline'
-        ? `не в сети, был ${formatAgo(client.last_seen_at)}`
-        : CLIENT_STATE_LABEL[state]
+  const status = clientStatusText(client)
 
   return (
     <section className="stack-lg" aria-label={`Клиент ${client.common_name}`}>
@@ -210,50 +392,7 @@ export function ClientInspector({ client }) {
             {client.common_name}
           </h2>
         </div>
-        {editingLabel ? (
-          <form
-            className="row-wrap"
-            onSubmit={(event) => {
-              event.preventDefault()
-              setEditingLabel(false)
-              void act(() =>
-                mesh.updateClient(client, { label: label.trim() || null }, 'Подпись сохранена'),
-              )
-            }}
-          >
-            <input
-              className="input"
-              style={{ flex: 1, minWidth: 160 }}
-              autoFocus
-              value={label}
-              maxLength={128}
-              placeholder="Телефон Ани"
-              aria-label="Подпись клиента"
-              onChange={(event) => setLabel(event.target.value)}
-            />
-            <button className="btn sm" type="submit">
-              Сохранить
-            </button>
-          </form>
-        ) : (
-          <div className="row-wrap" style={{ gap: 6 }}>
-            <span className={state === 'noaccess' ? 'warn-text' : 'muted'} style={{ fontSize: 13 }}>
-              {client.label ? `${client.label} · ` : ''}
-              {status}
-            </span>
-            {editable && (
-              <button
-                className="icon-btn"
-                type="button"
-                style={{ width: 28, height: 28 }}
-                aria-label="Изменить подпись"
-                onClick={() => setEditingLabel(true)}
-              >
-                <Icon name="edit" size={14} />
-              </button>
-            )}
-          </div>
-        )}
+        <ClientLabel client={client} status={status} warn={state === 'noaccess'} />
       </div>
 
       <div className="stack" style={{ gap: 6 }}>
@@ -327,118 +466,11 @@ export function ClientInspector({ client }) {
         </div>
       </div>
 
-      <div className="stack" style={{ gap: 6 }}>
-        <div className="panel-head">
-          <span className="lbl">Доступ к узлам</span>
-          <span className="hint">
-            {client.access.length} из {nodes.length}
-          </span>
-        </div>
-        <div className="bleed">
-          {nodes.map((node) => {
-            const grant = client.access.find((g) => g.node_id === node.id)
-            const on = Boolean(grant)
-            const fromGroup = Boolean(grant?.group_id)
-            const locked = !editable || busy || fromGroup
-            const down = nodeState(node) !== 'up'
-            return (
-              <div key={node.id} className="stack" style={{ gap: 0 }}>
-                <div className="row-wrap" style={{ flexWrap: 'nowrap', gap: 0 }}>
-                  <button
-                    type="button"
-                    className="trow"
-                    aria-pressed={on}
-                    aria-disabled={locked}
-                    title={fromGroup ? `Выдано группой «${group?.name}»: меняется в группе` : undefined}
-                    onClick={() => {
-                      if (locked) return
-                      void act(() => (on ? mesh.revoke(client, node.id) : mesh.grant(client, node.id)))
-                    }}
-                  >
-                    <span className={on ? 'sw on' : 'sw'} style={fromGroup ? { opacity: 0.6 } : undefined} />
-                    <span className="t-main">
-                      <span className="t-title mono">{node.name}</span>
-                      <span className={`t-sub${node.is_hub ? '' : ' mono'}${grant?.networks ? ' exit-text' : ''}`}>
-                        {node.is_hub ? 'сама панель' : scopeText(grant?.networks ?? null, node.subnets) || 'сетей не объявил'}
-                      </span>
-                    </span>
-                    {fromGroup && <span className="chip" style={{ height: 22 }}>группа</span>}
-                    {down && <span className="err-text" style={{ fontSize: 11 }}>недоступен</span>}
-                  </button>
-                  {editable && on && !fromGroup && !node.is_hub && node.subnets.length > 0 && (
-                    <button
-                      type="button"
-                      className="btn sm ghost"
-                      aria-expanded={scopeFor === node.id}
-                      onClick={() => setScopeFor(scopeFor === node.id ? null : node.id)}
-                    >
-                      {grant.networks ? 'Изменить' : 'Сузить'}
-                    </button>
-                  )}
-                </div>
-                {scopeFor === node.id && grant && (
-                  <div style={{ padding: '4px 10px 12px' }}>
-                    <ScopeEditor
-                      node={node}
-                      networks={grant.networks}
-                      busy={busy}
-                      onCancel={() => setScopeFor(null)}
-                      onSave={(networks) =>
-                        void act(async () => {
-                          await mesh.setGrantScope(grant, networks, `${client.common_name} → ${node.name}`)
-                          setScopeFor(null)
-                        })
-                      }
-                    />
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      </div>
+      <ClientAccessList client={client} />
 
       <div className="stack" style={{ gap: 6 }}>
         <span className="lbl">Выход в интернет</span>
-        <div
-          className="bleed"
-          style={{ gap: 4, opacity: groupExit ? 0.55 : 1 }}
-          title={groupExit ? `Выход задаёт группа «${group.name}»` : undefined}
-        >
-          <button
-            type="button"
-            className={`opt${exit ? '' : ' on'}`}
-            aria-pressed={!exit}
-            disabled={!editable || busy || Boolean(groupExit)}
-            onClick={() => void act(() => mesh.setExit(client, null))}
-          >
-            <span className="radio" />
-            <span className="t-main" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={{ fontSize: 13, fontWeight: 500 }}>Не выпускать</span>
-              <span className="hint">только разрешённые сети</span>
-            </span>
-          </button>
-          {client.access.map((grant) => (
-            <button
-              key={grant.grant_id}
-              type="button"
-              className={`opt${grant.is_exit ? ' on' : ''}`}
-              aria-pressed={grant.is_exit}
-              disabled={!editable || busy || Boolean(groupExit)}
-              onClick={() => void act(() => mesh.setExit(client, grant.node_id))}
-            >
-              <span className="radio" />
-              <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span style={{ fontSize: 13, fontWeight: 500 }}>
-                  Через <span className="mono">{grant.node_name}</span>
-                </span>
-                <span className="hint">
-                  {grant.node_is_hub ? 'IP панели' : 'IP узла, его сети тоже видны'}
-                </span>
-              </span>
-            </button>
-          ))}
-        </div>
+        <ClientExitOptions client={client} />
         <span className="hint">
           {nets.length > 0 && (
             <>
@@ -454,29 +486,10 @@ export function ClientInspector({ client }) {
         </span>
       </div>
 
-      <div className="panel" style={{ overflow: 'hidden', borderRadius: 12 }}>
-        <button
-          type="button"
-          className="trow"
-          style={{ borderRadius: 0, padding: '8px 14px' }}
-          aria-expanded={ccdOpen}
-          onClick={() => setCcdOpen((open) => !open)}
-        >
-          <span className="t-main">
-            <span className="t-title">Тонкая настройка (ccd)</span>
-            <span className="t-sub">что получает клиент при подключении</span>
-          </span>
-          <Icon name="chevron" size={14} style={{ transform: ccdOpen ? 'rotate(180deg)' : 'none' }} />
-        </button>
-        {ccdOpen && (
-          <div className="stack" style={{ padding: '0 14px 14px' }}>
-            <CcdPreview client={client} />
-            <Link className="btn sm" to={`/ccd?client=${client.id}`} style={{ alignSelf: 'flex-start' }}>
-              Маршруты, iroute и push
-            </Link>
-          </div>
-        )}
-      </div>
+      <Link className="btn" to={`/clients/${client.id}`}>
+        <Icon name="sliders" size={15} />
+        Сеть клиента и все настройки
+      </Link>
 
       <div className="stack" style={{ gap: 8 }}>
         {client.cert_serial && client.status !== 'revoked' ? (

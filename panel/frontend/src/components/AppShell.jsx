@@ -20,7 +20,6 @@ const NAV = [
   { to: '/map', label: 'Карта', icon: 'map' },
   { to: '/clients', label: 'Клиенты', icon: 'users' },
   { to: '/nodes', label: 'Узлы', icon: 'server', badge: 'pending' },
-  { to: '/ccd', label: 'Доступ', icon: 'sliders' },
   { to: '/pki', label: 'PKI', icon: 'key' },
   { to: '/traffic', label: 'Трафик', icon: 'activity' },
   { to: '/audit', label: 'Аудит', icon: 'list' },

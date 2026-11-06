@@ -10,12 +10,10 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
-    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -272,6 +270,20 @@ class Client(Base, UUIDMixin, TimestampMixin):
     # has to be the client's own rather than whatever the pool handed out today.
     tunnel_host: Mapped[int | None] = mapped_column(Integer, unique=True)
 
+    # A client dials only the hub and gets one file there, so what goes into it
+    # beyond its access belongs to the client rather than to a client-node pair.
+    #
+    # Networks reached through the tunnel on top of what its grants open: pushed
+    # as routes and let through the hub's firewall.
+    push_routes: Mapped[list[str] | None] = mapped_column(JSON)
+    # Networks *behind* this client, when it is a gateway rather than a laptop.
+    iroutes: Mapped[list[str] | None] = mapped_column(JSON)
+    # Extra push directives, validated against an allow list before they land in
+    # a ccd file: a bad line there stops the client connecting at all.
+    push_options: Mapped[list[str] | None] = mapped_column(JSON)
+    # Its own resolvers in place of the hub's. NULL means the hub's.
+    dns_servers: Mapped[list[str] | None] = mapped_column(JSON)
+
     # PKI. The key is kept encrypted so the .ovpn can be handed out again; anyone
     # who can read it can already mint new certificates from the CA next to it.
     cert_serial: Mapped[str | None] = mapped_column(String(64), unique=True)
@@ -307,24 +319,10 @@ class Client(Base, UUIDMixin, TimestampMixin):
 
 
 class ClientNodeGrant(Base, UUIDMixin, TimestampMixin):
-    """Which nodes a client is allowed to exit through, and on what terms.
-
-    This row is also the client-config-dir entry for that pair: OpenVPN reads
-    one ccd file per common name per node, which is exactly this granularity.
-    """
+    """Which nodes a client is allowed to exit through, and on what terms."""
 
     __tablename__ = "client_node_grants"
-    __table_args__ = (
-        UniqueConstraint("client_id", "node_id", name="uq_client_node"),
-        # Two clients cannot be pinned to the same tunnel address on one node.
-        Index(
-            "uq_node_static_host",
-            "node_id",
-            "static_host",
-            unique=True,
-            postgresql_where=text("static_host IS NOT NULL"),
-        ),
-    )
+    __table_args__ = (UniqueConstraint("client_id", "node_id", name="uq_client_node"),)
 
     client_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("clients.id", ondelete="CASCADE"), index=True
@@ -333,28 +331,9 @@ class ClientNodeGrant(Base, UUIDMixin, TimestampMixin):
         ForeignKey("nodes.id", ondelete="CASCADE"), index=True
     )
 
-    # Host part of the fixed tunnel address, not the address itself: a node runs
-    # a UDP and a TCP listener on two different subnets, and the same client has
-    # to land on the same host number whichever one it reaches.
-    #
-    # Only meaningful for a node that serves clients directly, which since the
-    # hub model means the panel itself; Client.tunnel_host is what the hub uses.
-    static_host: Mapped[int | None] = mapped_column(Integer)
-
     # Send this client's whole internet out through this node. A client has one
     # default route, so at most one of its grants may carry this.
     is_exit: Mapped[bool] = mapped_column(Boolean, default=False)
-
-    # Networks pushed to this client, as CIDR strings.
-    push_routes: Mapped[list[str] | None] = mapped_column(JSON)
-
-    # Networks reachable *behind* this client, needed when it is a site gateway
-    # rather than a laptop.
-    iroutes: Mapped[list[str] | None] = mapped_column(JSON)
-
-    # Extra push directives, validated against an allow list before they land in
-    # a ccd file: a bad line there stops the client connecting at all.
-    push_options: Mapped[list[str] | None] = mapped_column(JSON)
 
     # Only part of the node's LAN: a subnet of it or single hosts. NULL means
     # every network the node announces.

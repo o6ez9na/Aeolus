@@ -1232,9 +1232,7 @@ pub fn doctor() -> i32 {
             Err(_) => String::new(),
         },
     );
-    let transit_up = fs::read_to_string(&cfg.transit_status_file)
-        .map(|s| s.starts_with("OpenVPN STATISTICS"))
-        .unwrap_or(false)
+    let transit_up = crate::status::transit_alive(&cfg.transit_status_file)
         && Path::new(&format!("/sys/class/net/{}", cfg.tun_dev)).exists();
     check(
         transit_up,

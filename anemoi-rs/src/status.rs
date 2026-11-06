@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::pb;
 
@@ -62,6 +62,36 @@ impl Reader {
         let delta = total.saturating_sub(before) as f64;
         (delta * 8.0 / elapsed / 1_000_000.0) as u32
     }
+}
+
+/// OpenVPN rewrites its status file every 5 seconds while it runs (see
+/// `patch_transit`), so anything much older means it stopped or is pausing
+/// between reconnects.
+const TRANSIT_STATUS_MAX_AGE: Duration = Duration::from_secs(30);
+
+/// Whether the transit really carries data. The tun device proves nothing, since
+/// persist-tun keeps it through an outage. "Auth read bytes" counts what passed
+/// the data channel's authentication since the last restart, and the hub's
+/// keepalives alone move it within seconds.
+pub fn transit_alive(path: &Path) -> bool {
+    let age = std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok());
+    match (std::fs::read_to_string(path), age) {
+        (Ok(text), Some(age)) => stats_show_traffic(&text, age),
+        _ => false,
+    }
+}
+
+fn stats_show_traffic(text: &str, age: Duration) -> bool {
+    age <= TRANSIT_STATUS_MAX_AGE
+        && text.starts_with("OpenVPN STATISTICS")
+        && text
+            .lines()
+            .find_map(|line| line.strip_prefix("Auth read bytes,"))
+            .and_then(|bytes| bytes.trim().parse::<u64>().ok())
+            .is_some_and(|bytes| bytes > 0)
 }
 
 pub fn parse(text: &str) -> Snapshot {
@@ -145,6 +175,32 @@ fn parse_client_stats(lines: &[&str]) -> Snapshot {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    fn transit_stats(auth_read: u64) -> String {
+        format!(
+            "OpenVPN STATISTICS\nUpdated,2026-11-06 19:33:50\nTUN/TAP read bytes,0\n\
+             TCP/UDP read bytes,900\nAuth read bytes,{auth_read}\nEND\n"
+        )
+    }
+
+    #[test]
+    fn a_transit_is_alive_only_with_fresh_authenticated_traffic() {
+        let fresh = Duration::from_secs(5);
+        assert!(stats_show_traffic(&transit_stats(11820), fresh));
+        // Connected to the bridge, but the data channel never came up.
+        assert!(!stats_show_traffic(&transit_stats(0), fresh));
+        // OpenVPN stopped or is pausing before a reconnect.
+        assert!(!stats_show_traffic(
+            &transit_stats(11820),
+            Duration::from_secs(300)
+        ));
+        assert!(!stats_show_traffic("OpenVPN CLIENT LIST\nEND\n", fresh));
+    }
+
+    #[test]
+    fn a_missing_status_file_is_not_a_live_transit() {
+        assert!(!transit_alive(Path::new("/nonexistent/status.log")));
+    }
 
     const SERVER: &str = "OpenVPN CLIENT LIST
 Updated,2026-10-31 11:00:00

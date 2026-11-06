@@ -3,6 +3,17 @@ import { useState } from 'react'
 import { linkBlocker, linkOf, versionAtLeast } from '../lib/links'
 import { useMesh } from '../lib/mesh'
 
+/** The one step of a link to the panel that the panel cannot take itself. */
+export function HubRouteHint({ node }) {
+  return (
+    <span className="hint">
+      Чтобы устройства из сети панели ходили сюда, на их роутере нужен маршрут:{' '}
+      <span className="mono">{node.site_networks.join(', ')}</span> через адрес панели в этой сети.
+      Открыто для всех устройств этой сети, гранты здесь не действуют.
+    </span>
+  )
+}
+
 /**
  * Network transit of an ordinary node: its LAN and the panel's, or another
  * node's, reaching each other over the transit, with no VPN client on any
@@ -52,7 +63,7 @@ export function SiteLinks({ node, editable, withHub = true, title = 'Транз�
               </span>
               <span className={`t-sub${nets.length ? ' mono' : ''}`}>
                 {nets.length
-                  ? `${nets.join(', ')} · ${peer.is_hub ? 'отсюда туда, через NAT панели' : 'в обе стороны'}`
+                  ? `${nets.join(', ')} · в обе стороны`
                   : blocked || '—'}
               </span>
             </span>
@@ -66,6 +77,7 @@ export function SiteLinks({ node, editable, withHub = true, title = 'Транз�
 
   const notes = (
     <>
+      {linked.some((peer) => peer.is_hub) && <HubRouteHint node={node} />}
       {oldAgent && linked.length > 0 && (
         <span className="hint warn-text">
           Агент {node.agent_version || '?'} не умеет транзит сетей: переустанови узел командой со

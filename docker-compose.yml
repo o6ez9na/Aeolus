@@ -106,6 +106,22 @@ services:
     expose:
       - "8080"
 
+  # The host's half of a site link to the panel: a route from the host into the
+  # openvpn container, so devices on the panel's LAN can reach the linked sites.
+  # The one service in the host's namespace, so it gets NET_ADMIN and the single
+  # file it reads, and none of the certificates and keys next to the plan.
+  host-routes:
+    build: ./deploy/openvpn
+    restart: unless-stopped
+    depends_on:
+      - openvpn
+    entrypoint: /usr/local/bin/host-routes.sh
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - openvpn-run:/run/openvpn:ro
+
   # The panel's own node agent. Remote nodes run this same image against
   # AEOLUS_DOMAIN with a token from the panel.
   anemoi:

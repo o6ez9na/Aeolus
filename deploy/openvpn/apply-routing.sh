@@ -100,17 +100,24 @@ done
 # --- site links -------------------------------------------------------------
 # A node's LAN reaching another site through the hub. Into the hub's own LAN it
 # is masqueraded: the devices there answer only their own gateway, which has
-# never heard of the node's addresses. A plan from an older panel has no
+# never heard of the node's addresses. Out of the hub's LAN ("snat") it takes the
+# hub's address in the client pool, the one thing a node lets into its LAN and to
+# its own address there; matched by destination, since a tun device's name
+# depends on which OpenVPN came up first. A plan from an older panel has no
 # "links", and jq counts that as zero.
 links=$(jqr '.links | length')
 j=0
 while [ "$j" -lt "$links" ]; do
     nat=$(jqr ".links[$j].nat")
+    snat=$(jqr ".links[$j].snat // empty")
     for src in $(jqr ".links[$j].src[]?"); do
         for dst in $(jqr ".links[$j].dst[]?"); do
             iptables -A "$CHAIN" -s "$src" -d "$dst" -j ACCEPT
             if [ "$nat" = true ]; then
                 iptables -t nat -A "$NAT_CHAIN" -s "$src" -d "$dst" -o "$UPLINK" -j MASQUERADE
+            fi
+            if [ -n "$snat" ]; then
+                iptables -t nat -A "$NAT_CHAIN" -s "$src" -d "$dst" -j SNAT --to-source "$snat"
             fi
         done
     done
@@ -182,5 +189,18 @@ while [ "$i" -lt "$count" ]; do
     done
     i=$((i + 1))
 done
+
+# --- host -------------------------------------------------------------------
+# Devices on the hub's LAN arrive at the host, and only a route there brings them
+# into this namespace. A container on a bridge cannot set one, so this says what
+# is needed and host-routes.sh does it: this container's address, then one
+# "source destination" pair per line. Replaced whole, never read half-written.
+HOST_ROUTES=/run/openvpn/host-routes
+mkdir -p "${HOST_ROUTES%/*}"
+{
+    ip -4 -o addr show "$UPLINK" | awk '{split($4, a, "/"); print a[1]; exit}'
+    jqr '.links[]? | select(.snat) | .src[] as $src | .dst[] as $dst | "\($src) \($dst)"'
+} >"$HOST_ROUTES.new"
+mv "$HOST_ROUTES.new" "$HOST_ROUTES"
 
 echo "routing plan applied: $(jqr '.revision') ($count clients, $links site links)"

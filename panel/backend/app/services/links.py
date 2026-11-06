@@ -9,8 +9,9 @@ and no node needs an inbound port.
 The hub is a node too. Its LAN is not in `subnets` (see Node.site_subnets), and
 the devices on it route only to their own gateway, which knows nothing of the
 sites behind the transit; so traffic into the hub's LAN is masqueraded behind
-the hub, and that direction only. Between two nodes there is no NAT: each node
-is the gateway of its LAN, and both ends know the way back.
+the hub, and traffic out of it takes the hub's address in the client pool. Between
+two nodes there is no NAT: each node is the gateway of its LAN, and both ends
+know the way back.
 """
 
 import ipaddress
@@ -148,13 +149,26 @@ def remote_networks(
     return sorted(remote, key=lambda net: ipaddress.ip_network(net, strict=False))
 
 
+def hub_lan_source() -> str:
+    """The address the hub's LAN wears on its way to a node: the hub's own in the pool."""
+    from app.services.openvpn import static_address
+
+    return static_address("udp", 1)
+
+
 def hub_rules(links: list[NodeLink], nodes: dict[uuid.UUID, Node]) -> list[dict]:
     """What the hub forwards for links, one entry per direction a flow may start.
 
     A link to the hub opens the hub's LAN to the node, masqueraded: the LAN's
-    devices could not answer an address from another site. The reverse, a
-    device at home starting a connection to the node's LAN, would need a route
-    on the home router and is left out.
+    devices could not answer an address from another site.
+
+    It also opens the node's LAN to the hub's, for devices whose router sends
+    those networks to the panel's host (host-routes.sh is the host's half). They
+    arrive at the node as the hub's address in the client pool: a node already
+    lets the pools into its LAN and to its own address there, and knows the way
+    back, while a linked site's address gets no way into the box. So this asks
+    nothing new of the node's agent. Grants do not apply: the link is the consent,
+    for every device on the hub's LAN.
     """
     rules: list[dict] = []
     for link in links:
@@ -165,6 +179,14 @@ def hub_rules(links: list[NodeLink], nodes: dict[uuid.UUID, Node]) -> list[dict]
             hub, node = (a, b) if a.is_hub else (b, a)
             rules.append(
                 {"src": site_networks(node), "dst": site_networks(hub), "nat": True}
+            )
+            rules.append(
+                {
+                    "src": site_networks(hub),
+                    "dst": site_networks(node),
+                    "nat": False,
+                    "snat": hub_lan_source(),
+                }
             )
         else:
             rules.append({"src": site_networks(a), "dst": site_networks(b), "nat": False})

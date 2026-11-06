@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { useAuth } from '../../auth/AuthContext'
-import { SiteLinks } from '../SiteLinks'
+import { HubRouteHint, SiteLinks } from '../SiteLinks'
 import { formatAgo } from '../../lib/format'
 import { linkBlocker, linkOf, versionAtLeast } from '../../lib/links'
 import { useMesh } from '../../lib/mesh'
@@ -362,6 +362,7 @@ export function TransitInspector({ node, hub, onSelect }) {
           {busy ? '…' : link ? 'Выключить транзит сетей' : 'Включить транзит сетей'}
         </button>
       )}
+      {link && <HubRouteHint node={node} />}
       {blocker && (
         <span className="hint warn-text">
           {blocker}

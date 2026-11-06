@@ -37,7 +37,8 @@ RUN set -eux; \
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY apply-routing.sh /usr/local/bin/apply-routing.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/apply-routing.sh
+COPY host-routes.sh /usr/local/bin/host-routes.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/apply-routing.sh /usr/local/bin/host-routes.sh
 
 # Config and certificates arrive through a volume the panel writes to.
 VOLUME /etc/openvpn/aeolus

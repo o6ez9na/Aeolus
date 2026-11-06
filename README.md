@@ -105,6 +105,61 @@ A node in the host namespace binds the host's interfaces directly and installs
 its NAT rules in the host's tables — simpler for an exit node, but no longer
 confined to a container.
 
+## Install a node on a router
+
+Routers run the `anemoi` agent directly, without Docker. `install-node.sh`
+fetches the binary for this machine (x86-64, aarch64, 32-bit mips and mipsel),
+checks it against the release's checksums and hands over to `anemoi install`,
+which installs OpenVPN and sets up the firewall and the service.
+
+Run it as root, replacing the domain, name and subnet with your own. `--name`
+and `--subnets` are optional: without `--subnets` the installer suggests the
+LAN it finds on the router. The same command, already filled in, is in the panel
+under **узлы**.
+
+### Keenetic with Entware
+
+Entware has to be installed already. Log in to its shell, not to the Keenetic
+CLI: it is a separate SSH server, on port `222` by default. Entware's own `wget`
+has no HTTPS, so install `wget-ssl` first:
+
+```sh
+opkg update && opkg install wget-ssl ca-bundle
+wget -qO- https://raw.githubusercontent.com/o6ez9na/Aeolus/main/scripts/install-node.sh \
+  | sh -s -- --panel vpn.example.com --name home --subnets 192.168.1.0/24
+```
+
+If the installer reports that the firmware lacks the `tun` module, enable the
+**OpenVPN** component in the Keenetic web UI, update and run it again.
+
+The agent lands in `/opt/bin/anemoi`, its settings in `/opt/etc/anemoi` and the
+service in `/opt/etc/init.d/S99anemoi`. A hook in `/opt/etc/ndm/netfilter.d`
+puts the firewall rules back each time Keenetic rebuilds its firewall.
+
+### OpenWrt
+
+```sh
+wget -qO- https://raw.githubusercontent.com/o6ez9na/Aeolus/main/scripts/install-node.sh \
+  | sh -s -- --panel vpn.example.com --name home --subnets 192.168.1.0/24
+```
+
+Packages come from `opkg`, or from `apk` on the releases that use it. The agent
+lands in `/usr/bin/anemoi`, its settings in `/etc/anemoi` and the service in
+`/etc/init.d/anemoi`.
+
+### After installing
+
+The installer prints the node's key fingerprint. Compare it and accept the node
+in the panel under **узлы → заявки**. Further commands, with the binary at the
+path above:
+
+```sh
+anemoi doctor             # check that everything the node needs is in place
+anemoi fingerprint        # print the key fingerprint again
+anemoi uninstall          # remove what install added, keeping the key and settings
+anemoi uninstall --purge  # remove the key and settings too
+```
+
 ## Run it by hand
 
 ```sh

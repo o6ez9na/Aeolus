@@ -1668,6 +1668,11 @@ button.chip:hover {
   box-shadow: 0 0 0 3px var(--bridge-soft);
 }
 
+.bridge-chip > span {
+  font-size: 15px;
+  font-weight: 600;
+}
+
 .bridge-chip.paused {
   border-color: var(--warn);
   color: var(--warn);
@@ -1823,7 +1828,12 @@ button.chip:hover {
 
 .m-node {
   width: 196px;
-  height: 64px;
+  min-height: 64px;
+  padding-block: 10px;
+}
+
+.mcard .s.net {
+  color: var(--muted);
 }
 
 .m-hub {
@@ -1846,18 +1856,6 @@ button.chip:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.m-lan {
-  min-width: 150px;
-  padding: 10px 14px;
-  background: var(--raised);
-  border-color: var(--line-strong);
-  border-radius: 10px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--muted);
-  cursor: default;
 }
 
 .m-inet {

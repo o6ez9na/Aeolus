@@ -136,24 +136,20 @@ export const NodeCard = memo(function NodeCard({ data: d }) {
   return (
     <div className={cls('m-node', d, extra)}>
       <Anchor type="target" position={Position.Left} id="in" />
+      <Anchor type="target" position={Position.Top} id="top" />
       <span className="t">
         <span className={dotClass(state)} />
         {node.name}
       </span>
       <span className={`s ${sub.tone}`}>{sub.text}</span>
+      {node.subnets.map((net) => (
+        <span key={net} className="s mono net">
+          {net}
+        </span>
+      ))}
       {d.candidate && <span className="m-badge">+ доступ</span>}
       <Anchor type="source" position={Position.Right} id="out" />
-    </div>
-  )
-})
-
-export const LanCard = memo(function LanCard({ data: d }) {
-  return (
-    <div className={cls('m-lan', d, d.pending ? 'dashed' : '')}>
-      <Anchor type="target" position={Position.Left} />
-      {d.subnets.map((net) => (
-        <span key={net}>{net}</span>
-      ))}
+      <Anchor type="source" position={Position.Bottom} id="bottom" />
     </div>
   )
 })
@@ -176,6 +172,5 @@ export const nodeTypes = {
   mgroup: GroupCard,
   hub: HubCard,
   vpnnode: NodeCard,
-  lan: LanCard,
   inet: InetCard,
 }

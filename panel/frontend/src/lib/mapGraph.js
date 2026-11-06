@@ -20,12 +20,17 @@ export const CLIENT_H = 56
 export const GROUP_W = CLIENT_W + 32
 const GROUP_HEAD = 62
 const MEMBER_STEP = 66
-const COL = { client: 0, hub: 330, node: 590, lan: 870 }
+const COL = { client: 0, hub: 330, node: 590, inet: 870 }
+const NODE_W = 196
+// Space a side-to-side line between two nodes needs to leave and arrive straight.
+const LINK_ROOM = 40
+
+/** A node card grows by a line per network; the gap leaves room for a link's chip. */
+const nodeStep = (node) => 103 + Math.max(1, node.subnets.length) * 21
 
 export const cid = (id) => `client:${id}`
 export const gid = (id) => `group:${id}`
 export const nid = (id) => `node:${id}`
-export const lid = (id) => `lan:${id}`
 export const HUB = 'hub'
 export const INET = 'inet'
 
@@ -79,19 +84,33 @@ export function autoPositions(prep) {
   const columnMid = Math.max(140, y / 2)
   pos[HUB] = { x: COL.hub, y: Math.max(40, columnMid - 66) }
 
-  const span = prep.shown.length * 96
+  const span = prep.shown.reduce((sum, node) => sum + nodeStep(node), 0)
   let ny = Math.max(40, columnMid - span / 2 + 16)
   for (const node of prep.shown) {
     pos[nid(node.id)] = { x: COL.node, y: ny }
-    pos[lid(node.id)] = { x: COL.lan, y: ny + 8 }
-    ny += 96
+    ny += nodeStep(node)
   }
-  pos[INET] = { x: COL.lan, y: Math.max(ny + 16, columnMid + 110) }
+  pos[INET] = { x: COL.inet, y: Math.max(ny + 16, columnMid + 110) }
   return pos
 }
 
 function edgeStyle(stroke, width, opacity) {
   return { stroke, strokeWidth: width, opacity }
+}
+
+/**
+ * Which sides a line between two nodes uses, going by how the cards stand: side
+ * to side when there is room between them, otherwise from the bottom of the upper
+ * card to the top of the lower one. Always leaving by the right and arriving on the
+ * left would make the line double back whenever the target stands further left.
+ */
+function linkRoute(a, b) {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) >= NODE_W + LINK_ROOM) {
+    return { swap: dx < 0, sourceHandle: 'out', targetHandle: 'in' }
+  }
+  return { swap: dy < 0, sourceHandle: 'bottom', targetHandle: 'top' }
 }
 
 /**
@@ -104,20 +123,14 @@ function focus(sel, prep, clients, links) {
   const cards = new Set([HUB])
   if (sel.type === 'transit') {
     edges.add(`t:${sel.id}`)
-    edges.add(`l:${sel.id}`)
     cards.add(nid(sel.id))
-    cards.add(lid(sel.id))
     return { edges, cards }
   }
   if (sel.type === 'link') {
     const link = links.find((l) => l.id === sel.id)
     if (!link) return null
     edges.add(`k:${link.id}`)
-    for (const id of [link.node_a_id, link.node_b_id]) {
-      edges.add(`l:${id}`)
-      cards.add(nid(id))
-      cards.add(lid(id))
-    }
+    for (const id of [link.node_a_id, link.node_b_id]) cards.add(nid(id))
     return { edges, cards }
   }
   const holder = (client) => (prep.groupOf[client.id] ? gid(prep.groupOf[client.id]) : cid(client.id))
@@ -129,9 +142,7 @@ function focus(sel, prep, clients, links) {
     for (const grant of client.access) {
       if (grant.node_is_hub) continue
       edges.add(`t:${grant.node_id}`)
-      edges.add(`l:${grant.node_id}`)
       cards.add(nid(grant.node_id))
-      cards.add(lid(grant.node_id))
     }
     const exit = client.access.find((g) => g.is_exit)
     if (exit) {
@@ -152,17 +163,13 @@ function focus(sel, prep, clients, links) {
     for (const grant of group.grants) {
       if (grant.node_is_hub) continue
       edges.add(`t:${grant.node_id}`)
-      edges.add(`l:${grant.node_id}`)
       cards.add(nid(grant.node_id))
-      cards.add(lid(grant.node_id))
     }
     if (group.grants.some((g) => g.is_exit)) cards.add(INET)
     group.members.forEach((m) => addClient(prep.byId[m]))
-  } else if (sel.type === 'node' || sel.type === 'lan') {
+  } else if (sel.type === 'node') {
     edges.add(`t:${sel.id}`)
-    edges.add(`l:${sel.id}`)
     cards.add(nid(sel.id))
-    cards.add(lid(sel.id))
     for (const client of clients) {
       const grant = client.access.find((g) => g.node_id === sel.id)
       if (!grant) continue
@@ -418,7 +425,7 @@ export function buildGraph({
               selected,
               chip:
                 bridged && !alive
-                  ? '⇄ транзит сетей · нет туннеля'
+                  ? '⇄ нет туннеля'
                   : !bridged && state === 'reconnecting'
                     ? 'переподключается…'
                     : selected
@@ -428,25 +435,6 @@ export function buildGraph({
               onOpen: () => onOpenEdge?.({ type: 'transit', id: node.id }),
             },
       })
-    }
-
-    if (node.subnets.length) {
-      const lan = lid(node.id)
-      const savedLan = saved[lan]
-      const nodePos = at(id)
-      rfNodes.push({
-        id: lan,
-        type: 'lan',
-        // A LAN nobody moved follows its node around.
-        position: savedLan ?? { x: nodePos.x + (COL.lan - COL.node), y: nodePos.y + 8 },
-        data: { subnets: node.subnets, pending, dim: connecting || op(lan) < 1 },
-      })
-      if (layers.lan) {
-        edge(`l:${node.id}`, id, lan, edgeStyle('var(--line-strong)', 1.5, eop(`l:${node.id}`)), {
-          cls: pending ? 'dashed' : '',
-          sourceHandle: 'out',
-        })
-      }
     }
 
     const exiting = exitsByNode[node.id]
@@ -470,17 +458,19 @@ export function buildGraph({
       const states = [nodeState(a), nodeState(b)]
       const alive = states.every((s) => s === 'up' || s === 'reconnecting')
       const selected = isSel('link', link.id)
-      edge(`k:${link.id}`, nid(a.id), nid(b.id), edgeStyle('var(--err)', 1.75, eop(`k:${link.id}`)), {
+      const route = linkRoute(at(nid(a.id)), at(nid(b.id)))
+      const [from, to] = route.swap ? [b, a] : [a, b]
+      edge(`k:${link.id}`, nid(from.id), nid(to.id), edgeStyle('var(--err)', 1.75, eop(`k:${link.id}`)), {
         cls: `transit-edge${selected ? ' sel' : ''}${alive ? '' : ' dashed-wide'}`,
-        sourceHandle: 'out',
-        targetHandle: 'in',
+        sourceHandle: route.sourceHandle,
+        targetHandle: route.targetHandle,
         type: 'transit',
         data: {
           bridged: alive,
           paused: states.includes('reconnecting'),
           both: true,
           selected,
-          chip: alive ? null : '⇄ транзит сетей · нет туннеля',
+          chip: alive ? null : '⇄ нет туннеля',
           chipTone: 'err',
           onOpen: () => onOpenEdge?.({ type: 'link', id: link.id }),
         },

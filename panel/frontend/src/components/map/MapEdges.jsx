@@ -7,8 +7,8 @@ import { memo } from 'react'
  * A plain transit tunnel is the usual blue line, clickable: the inspector it
  * opens offers to switch on network transit. With network transit on it turns
  * into a bridge: a blue-to-teal tube with a glow and packets running along it,
- * one way into the panel's LAN (masqueraded there) or both ways between two
- * nodes, and a chip that names it.
+ * one stream on a line from the panel and one each way between two nodes, and a
+ * small chip that opens it. The chip adds words only when something is wrong.
  */
 export const TransitEdge = memo(function TransitEdge({
   id,
@@ -87,8 +87,10 @@ export const TransitEdge = memo(function TransitEdge({
           style={chipAt}
           onClick={open}
           title="Транзит сетей: открыть настройку"
+          aria-label={`Транзит сетей${data.paused ? ', переподключается' : ''}: открыть настройку`}
         >
-          <span aria-hidden="true">⇄</span> транзит сетей{data.paused ? ' · переподключается' : ''}
+          <span aria-hidden="true">⇄</span>
+          {data.paused ? ' переподключается' : ''}
         </button>
       </EdgeLabelRenderer>
     </>

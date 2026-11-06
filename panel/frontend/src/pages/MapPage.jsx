@@ -35,12 +35,11 @@ import { canEdit, exitGrant, nodeState } from '../lib/model'
 import { useTheme } from '../theme/ThemeContext'
 
 const LAYERS_KEY = 'aeolus.map.layers'
-const DEFAULT_LAYERS = { sessions: true, transit: true, lan: true, exits: true, access: false }
+const DEFAULT_LAYERS = { sessions: true, transit: true, exits: true, access: false }
 
 const LAYER_DEFS = [
   ['sessions', 'Сессии', 'var(--live)'],
   ['transit', 'Транзит', 'var(--transit)'],
-  ['lan', 'Сети', 'var(--line-strong)'],
   ['exits', 'Выходы', 'var(--exit)'],
   ['access', 'Доступы', 'var(--accent)'],
 ]
@@ -286,7 +285,7 @@ function MapView() {
       }
       let node = null
       if (target === 'hub') node = prep.hub
-      else if (target.startsWith('node:') || target.startsWith('lan:')) {
+      else if (target.startsWith('node:')) {
         const id = target.slice(target.indexOf(':') + 1)
         node = nodes.find((n) => n.id === id)
       }
@@ -327,7 +326,7 @@ function MapView() {
     (_, node) => {
       const at = node.id.indexOf(':')
       const [type, id] = at < 0 ? [node.id, undefined] : [node.id.slice(0, at), node.id.slice(at + 1)]
-      if (type === 'node' || type === 'lan') {
+      if (type === 'node') {
         const target = nodes.find((n) => n.id === id)
         setSel({ type: target?.approval === 'pending' ? 'pending' : 'node', id })
       } else {

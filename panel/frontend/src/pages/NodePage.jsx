@@ -159,10 +159,6 @@ function MiniMap({ node, clients, hub }) {
     }
     const from = node.is_hub ? 'hub' : 'node'
     const x = node.is_hub ? 540 : 800
-    if (node.subnets.length) {
-      nodes.push({ id: 'lan', type: 'lan', position: { x, y: mid - 56 }, data: { subnets: node.subnets } })
-      edges.push({ id: 'l', source: from, sourceHandle: node.is_hub ? 'out' : 'out', target: 'lan', style: style('var(--line-strong)', 1.5) })
-    }
     if (exits.length) {
       nodes.push({ id: 'inet', type: 'inet', position: { x, y: mid + 40 }, data: { count: exits.length } })
       edges.push({

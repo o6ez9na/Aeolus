@@ -155,26 +155,35 @@ The Docker image now runs the same Rust agent; existing enrolment/state volumes
 and uid 10001 are preserved. A separately installed legacy Python agent only
 receives the list and does not run this proxy.
 
-On Keenetic, after updating the agent and panel, test from the Entware shell:
-
-```sh
-nslookup example.org 127.0.0.1:5354
-# If this nslookup cannot specify a port, use: dig @127.0.0.1 -p 5354 example.org
-```
-
-Then run in the **Keenetic CLI**, not the Entware shell:
+On Keenetic, some firmware rejects loopback as an upstream DNS address. Bind
+Anemoi to the router's **actual LAN IP** instead. For example, if the router is
+`192.168.3.2`, put this in `/opt/etc/anemoi/anemoi.env` in the Entware shell:
 
 ```text
-ip name-server 127.0.0.1:5354
+ANEMOI_DNS_LISTEN=192.168.3.2:5354
+```
+
+Restart `/opt/etc/init.d/S99anemoi restart`, then configure in the **Keenetic CLI**:
+
+```text
+ip name-server 192.168.3.2:5354
 system configuration save
 ```
+
+Replace that example address with the node's actual LAN IP. The listener binds
+only that address, not every interface. Test with
+`dig @192.168.3.2 -p 5354 example.org` from a machine with access to the LAN.
 
 Keenetic documents this syntax under
 [non-standard DNS ports](https://support.keenetic.com/titan-se/kn-4210/en/19726-setting-a-non-standard-port-for-a-dns-server.html).
 Other DNS servers, DoH/DoT and per-device policies may bypass Anemoi. After
 checking resolution, choose whether to keep those as fallback or remove them
-in the router's DNS settings. The agent does not change DHCP or router DNS settings.
-To undo, run `no ip name-server 127.0.0.1:5354`, restore the previous DNS servers
+in the router's DNS settings. For a private zone, an explicit suffix route such
+as `ip name-server 192.168.3.2:5354 example.internal` keeps its queries on Anemoi
+while retaining ISP DNS for other names. The agent does not change DHCP or router
+DNS settings. Clients with explicit DHCP DNS servers continue querying those
+servers directly; they do not go through Anemoi automatically.
+To undo, run `no ip name-server 192.168.3.2:5354`, restore the previous DNS servers
 if removed, then `system configuration save`.
 
 IPv4 upstreams outside the node's own LAN are routed through the VPN. The hub

@@ -1,9 +1,0 @@
-.git/
-**/node_modules/
-**/.venv/
-**/dist/
-**/__pycache__/
-**/*.pyc
-.env
-**/.env
-**/grpc_gen/

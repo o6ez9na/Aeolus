@@ -1,5 +1,9 @@
 # Aeolus
 
+Primary repository: [Gitea](http://10.31.1.243:3000/Aeolus/Aeolus).
+GitHub mirrors this README and [Anemoi release downloads](https://github.com/o6ez9na/Aeolus/releases); source changes and CI live in Gitea.
+
+
 Master VPN panel. Operators manage OpenVPN exit nodes from one place; clients get a
 config that routes them out through whichever node they are granted.
 
@@ -20,12 +24,16 @@ the local node exactly the way it talks to remote ones.
 
 ## Install with one command
 
+The panel/Docker installer clones the private Gitea repository over SSH: give the
+host a Gitea-authorized SSH key, or set `REPO_URL` to an accessible Gitea clone URL.
+Native router installations download public release assets and need no Gitea login.
+
 On a fresh Debian or Ubuntu box, as root. It asks for a language, then whether
 this machine is the panel or a node, installs Docker if missing, checks that
 containers can actually reach the package mirrors, and brings the stack up:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/o6ez9na/Aeolus/main/scripts/install.sh | sudo bash
+curl -fsSL https://github.com/o6ez9na/Aeolus/releases/latest/download/install.sh | sudo bash
 ```
 
 Non-interactive:
@@ -125,7 +133,7 @@ has no HTTPS, so install `wget-ssl` first:
 
 ```sh
 opkg update && opkg install wget-ssl ca-bundle
-wget -qO- https://raw.githubusercontent.com/o6ez9na/Aeolus/main/scripts/install-node.sh \
+wget -qO- https://github.com/o6ez9na/Aeolus/releases/latest/download/install-node.sh \
   | sh -s -- --panel vpn.example.com --name home --subnets 192.168.1.0/24
 ```
 
@@ -136,10 +144,83 @@ The agent lands in `/opt/bin/anemoi`, its settings in `/opt/etc/anemoi` and the
 service in `/opt/etc/init.d/S99anemoi`. A hook in `/opt/etc/ndm/netfilter.d`
 puts the firewall rules back each time Keenetic rebuilds its firewall.
 
+### DNS proxy on a node (Anemoi 0.5.0+)
+
+The native Rust agent includes a DNS forwarder on **127.0.0.1:5354**, UDP and TCP.
+Set up to four upstream IP addresses in the hub's **DNS для клиентов** field.
+The panel sends the list over the existing authenticated gRPC channel; the
+agent reloads it without restarting the DNS listener. The router keeps its
+own DNS service and cache on port 53; LAN devices keep using the router as DNS.
+The Docker image now runs the same Rust agent; existing enrolment/state volumes
+and uid 10001 are preserved. A separately installed legacy Python agent only
+receives the list and does not run this proxy.
+
+On Keenetic, after updating the agent and panel, test from the Entware shell:
+
+```sh
+nslookup example.org 127.0.0.1:5354
+# If this nslookup cannot specify a port, use: dig @127.0.0.1 -p 5354 example.org
+```
+
+Then run in the **Keenetic CLI**, not the Entware shell:
+
+```text
+ip name-server 127.0.0.1:5354
+system configuration save
+```
+
+Keenetic documents this syntax under
+[non-standard DNS ports](https://support.keenetic.com/titan-se/kn-4210/en/19726-setting-a-non-standard-port-for-a-dns-server.html).
+Other DNS servers, DoH/DoT and per-device policies may bypass Anemoi. After
+checking resolution, choose whether to keep those as fallback or remove them
+in the router's DNS settings. The agent does not change DHCP or router DNS settings.
+To undo, run `no ip name-server 127.0.0.1:5354`, restore the previous DNS servers
+if removed, then `system configuration save`.
+
+IPv4 upstreams outside the node's own LAN are routed through the VPN. The hub
+allows only DNS (UDP/TCP 53) to those destinations, with NAT for the return
+path; this does not grant access to the resolver's other services or LAN.
+IPv6 upstreams require the node's own IPv6 connectivity: the transit is IPv4.
+Loopback, local-interface, unspecified and multicast upstreams are rejected to
+avoid forwarding loops. Resolver failures/timeouts try the next configured
+server; NXDOMAIN is returned unchanged. If all fail, clients receive SERVFAIL.
+There is no hidden fallback to public DNS. Cached LAN answers remain the router's job.
+
+The agent remembers the panel's last resolved IP addresses in its persistent
+state directory. If DNS is unavailable during startup, it can reconnect using
+those addresses while still checking the original TLS name and certificate.
+This covers a private upstream reachable only after the VPN comes up. If the
+panel moves while all DNS is unavailable, restore working DNS to refresh the cache.
+
+
+### DNS proxy in Docker
+
+Rebuild the node stack with the updated Compose files. The agent shares the
+OpenVPN container's network namespace, so DNS queries can use the tunnel's
+routes. In bridge mode the listener binds inside that namespace; Compose
+publishes **127.0.0.1:5354** for both UDP and TCP on the host. The host-network
+override binds directly to loopback and removes port publishing.
+
+```sh
+docker compose -f docker-compose.node.yml up -d --build
+# The host can test with:
+dig @127.0.0.1 -p 5354 example.org
+```
+
+A resolver on the same host can forward to that address. A Keenetic on a
+*different machine* cannot use this host's loopback. Set `ANEMOI_DNS_BIND` in the
+node's `.env` to its actual LAN IPv4 address (for example `192.168.1.10`), then
+recreate the stack with the same Compose command. This works in both bridge
+and host-network modes. Restrict access to the router in the host firewall,
+then configure `ip name-server 192.168.1.10:5354` on Keenetic. Keep DHCP handing
+out the Keenetic's own LAN address as DNS: DHCP cannot advertise port 5354.
+Do not publish DNS on every host interface. No host `/etc/resolv.conf` is overwritten.
+
+
 ### OpenWrt
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/o6ez9na/Aeolus/main/scripts/install-node.sh \
+wget -qO- https://github.com/o6ez9na/Aeolus/releases/latest/download/install-node.sh \
   | sh -s -- --panel vpn.example.com --name home --subnets 192.168.1.0/24
 ```
 
@@ -276,6 +357,9 @@ Next, in order:
 4. `moirai`: client-facing config distribution.
 
 ### Redeploying by hand
+
+Gitea Actions can validate each change and deploy successful `main` commits to
+the existing panel. See [CI/CD setup and recovery](deploy/ci/README.md).
 
 `deploy/Caddyfile` is bind-mounted as a single file, and rsync replaces it with
 a new inode — the running container keeps the old one. Recreate rather than

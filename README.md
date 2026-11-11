@@ -1,7 +1,7 @@
 # Aeolus
 
-Primary repository: [Gitea](http://10.31.1.243:3000/Aeolus/Aeolus).
-GitHub mirrors this README and [Anemoi release downloads](https://github.com/o6ez9na/Aeolus/releases); source changes and CI live in Gitea.
+Development and CI are hosted privately. This repository mirrors the README and
+[public Anemoi downloads](https://github.com/o6ez9na/Aeolus/releases).
 
 
 Master VPN panel. Operators manage OpenVPN exit nodes from one place; clients get a
@@ -24,8 +24,9 @@ the local node exactly the way it talks to remote ones.
 
 ## Install with one command
 
-The panel/Docker installer clones the private Gitea repository over SSH: give the
-host a Gitea-authorized SSH key, or set `REPO_URL` to an accessible Gitea clone URL.
+The panel/Docker installer requires `REPO_URL` with your private repository clone
+URL and the corresponding Git access. No private source address is bundled in
+public downloads.
 Native router installations download public release assets and need no Gitea login.
 
 On a fresh Debian or Ubuntu box, as root. It asks for a language, then whether
@@ -33,7 +34,7 @@ this machine is the panel or a node, installs Docker if missing, checks that
 containers can actually reach the package mirrors, and brings the stack up:
 
 ```sh
-curl -fsSL https://github.com/o6ez9na/Aeolus/releases/latest/download/install.sh | sudo bash
+curl -fsSL https://github.com/o6ez9na/Aeolus/releases/latest/download/install.sh | sudo REPO_URL=YOUR_PRIVATE_CLONE_URL bash
 ```
 
 Non-interactive:
@@ -157,33 +158,33 @@ receives the list and does not run this proxy.
 
 On Keenetic, some firmware rejects loopback as an upstream DNS address. Bind
 Anemoi to the router's **actual LAN IP** instead. For example, if the router is
-`192.168.3.2`, put this in `/opt/etc/anemoi/anemoi.env` in the Entware shell:
+`192.168.1.1`, put this in `/opt/etc/anemoi/anemoi.env` in the Entware shell:
 
 ```text
-ANEMOI_DNS_LISTEN=192.168.3.2:5354
+ANEMOI_DNS_LISTEN=192.168.1.1:5354
 ```
 
 Restart `/opt/etc/init.d/S99anemoi restart`, then configure in the **Keenetic CLI**:
 
 ```text
-ip name-server 192.168.3.2:5354
+ip name-server 192.168.1.1:5354
 system configuration save
 ```
 
 Replace that example address with the node's actual LAN IP. The listener binds
 only that address, not every interface. Test with
-`dig @192.168.3.2 -p 5354 example.org` from a machine with access to the LAN.
+`dig @192.168.1.1 -p 5354 example.org` from a machine with access to the LAN.
 
 Keenetic documents this syntax under
 [non-standard DNS ports](https://support.keenetic.com/titan-se/kn-4210/en/19726-setting-a-non-standard-port-for-a-dns-server.html).
 Other DNS servers, DoH/DoT and per-device policies may bypass Anemoi. After
 checking resolution, choose whether to keep those as fallback or remove them
 in the router's DNS settings. For a private zone, an explicit suffix route such
-as `ip name-server 192.168.3.2:5354 example.internal` keeps its queries on Anemoi
+as `ip name-server 192.168.1.1:5354 example.internal` keeps its queries on Anemoi
 while retaining ISP DNS for other names. The agent does not change DHCP or router
 DNS settings. Clients with explicit DHCP DNS servers continue querying those
 servers directly; they do not go through Anemoi automatically.
-To undo, run `no ip name-server 192.168.3.2:5354`, restore the previous DNS servers
+To undo, run `no ip name-server 192.168.1.1:5354`, restore the previous DNS servers
 if removed, then `system configuration save`.
 
 IPv4 upstreams outside the node's own LAN are routed through the VPN. The hub

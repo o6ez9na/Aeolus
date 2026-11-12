@@ -161,30 +161,31 @@ receives the list and does not run this proxy.
 the longest matching suffix wins. That query only uses its assigned resolver,
 including on timeout or NXDOMAIN. Add a resolver without a suffix for other
 queries. If no general resolver is configured, unmatched queries return SERVFAIL.
-Older agents ignore domain rules; upgrade before relying on them. This selects
-upstreams inside Anemoi, not DNS settings on a computer or browser. Direct
-OpenVPN DNS addresses do not carry domain rules. Point clients at the node's
-DNS proxy; if the router keeps other upstreams, configure suffix forwarding to
-Anemoi too. The node page generates the Keenetic command template for saved zones.
+Older agents ignore domain rules; upgrade before relying on them.
 
-On Keenetic, some firmware rejects loopback as an upstream DNS address. Bind
-Anemoi to the router's **actual LAN IP** instead. For example, if the router is
-`192.168.1.1`, put this in `/opt/etc/anemoi/anemoi.env` in the Entware shell:
+**VPN clients:** the hub now pushes its own tunnel DNS address, separately for
+UDP and TCP. The hub's Anemoi proxy uses the same upstream/domain configuration
+as remote nodes. Standard UDP/TCP port 53 is redirected inside the VPN namespace
+to the unprivileged proxy; DNS is not published on the host and other sources
+are rejected. Explicit per-client DNS overrides still take precedence.
+Clients connected before this update must reconnect once to receive the new DNS.
+Subsequent upstream/domain changes reload the proxy without reconnecting clients.
 
-```text
-ANEMOI_DNS_LISTEN=192.168.1.1:5354
-```
+**Keenetic automation (Anemoi 0.6.2+):** the native supervised agent detects the
+LAN IPv4 address on `br0` when its listener uses the default loopback or wildcard.
+An explicit listener address is preserved. It reconciles the router's domain
+forwarding from the panel, adds the proxy as a general upstream when a resolver
+without a zone exists, and saves changes. Removed zones and changed listener
+addresses remove only previously managed Anemoi entries. ISP DNS and unrelated
+manual entries are preserved. Configuration is checked again after startup and
+on each poll; unchanged state does not rewrite flash. NDMS commands run outside
+the DNS event loop. Failures are logged and included in the node's status message.
+No hand-written `ip name-server` commands are needed for panel-managed zones.
 
-Restart `/opt/etc/init.d/S99anemoi restart`, then configure in the **Keenetic CLI**:
-
-```text
-ip name-server 192.168.1.1:5354
-system configuration save
-```
-
-Replace that example address with the node's actual LAN IP. The listener binds
-only that address, not every interface. Test with
-`dig @192.168.1.1 -p 5354 example.org` from a machine with access to the LAN.
+Other native platforms and Docker nodes still need their LAN's existing DNS
+service to forward to Anemoi; an LXC cannot configure a separate LAN gateway.
+For older Keenetic agents, set `ANEMOI_DNS_LISTEN` to the real LAN IP and manually
+add `ip name-server LAN_IP:5354 example.internal`, or upgrade to 0.6.2.
 
 Keenetic documents this syntax under
 [non-standard DNS ports](https://support.keenetic.com/titan-se/kn-4210/en/19726-setting-a-non-standard-port-for-a-dns-server.html).
@@ -192,8 +193,8 @@ Other DNS servers, DoH/DoT and per-device policies may bypass Anemoi. After
 checking resolution, choose whether to keep those as fallback or remove them
 in the router's DNS settings. For a private zone, an explicit suffix route such
 as `ip name-server 192.168.1.1:5354 example.internal` keeps its queries on Anemoi
-while retaining ISP DNS for other names. The agent does not change DHCP or router
-DNS settings. Clients with explicit DHCP DNS servers continue querying those
+while retaining ISP DNS for other names. The agent does not change DHCP. Keenetic 0.6.2 manages its own router DNS entries
+as described above. Clients with explicit DHCP DNS servers continue querying those
 servers directly; they do not go through Anemoi automatically.
 To undo, run `no ip name-server 192.168.1.1:5354`, restore the previous DNS servers
 if removed, then `system configuration save`.

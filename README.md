@@ -156,6 +156,17 @@ The Docker image now runs the same Rust agent; existing enrolment/state volumes
 and uid 10001 are preserved. A separately installed legacy Python agent only
 receives the list and does not run this proxy.
 
+**Domain routing (Anemoi 0.6.0+):** add suffixes beside each resolver, such as
+`*.example.internal`. The suffix matches both the domain itself and its subdomains;
+the longest matching suffix wins. That query only uses its assigned resolver,
+including on timeout or NXDOMAIN. Add a resolver without a suffix for other
+queries. If no general resolver is configured, unmatched queries return SERVFAIL.
+Older agents ignore domain rules; upgrade before relying on them. This selects
+upstreams inside Anemoi, not DNS settings on a computer or browser. Direct
+OpenVPN DNS addresses do not carry domain rules. Point clients at the node's
+DNS proxy; if the router keeps other upstreams, configure suffix forwarding to
+Anemoi too. The node page generates the Keenetic command template for saved zones.
+
 On Keenetic, some firmware rejects loopback as an upstream DNS address. Bind
 Anemoi to the router's **actual LAN IP** instead. For example, if the router is
 `192.168.1.1`, put this in `/opt/etc/anemoi/anemoi.env` in the Entware shell:
